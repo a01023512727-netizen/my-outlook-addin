@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>ADDIN INSTALL TEST</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; padding: 16px; margin: 0; }
+    .box { border: 1px solid #ddd; border-radius: 8px; padding: 12px; }
+    .title { font-weight: 700; margin-bottom: 6px; }
+    .ok { color: #0a7a0a; font-weight: 700; }
+    .small { color: #666; font-size: 12px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="title">✅ Add-in 설치 테스트</div>
+    <div class="ok">이 화면이 보이면 “설치 + 로딩”까지 성공입니다.</div>
+    <div class="small" id="ts"></div>
+  </div>
+
+  <script>
+    document.getElementById("ts").textContent = "Loaded at: " + new Date().toISOString();
+  </script>
+</body>
+</html>
