@@ -18,6 +18,7 @@
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
     th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
     td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
+
     button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
     .muted { color:#777; font-size:12px; white-space:pre-wrap; margin-top:8px; }
   </style>
@@ -28,7 +29,6 @@
   <div class="box">
     <div class="row"><span class="label">발신자 이메일</span> <span class="value" id="fromEmail">-</span></div>
     <div class="row"><span class="label">발신자 도메인</span> <span class="value" id="fromDomain">-</span></div>
-    <div class="row"><span class="label">정규화 도메인</span> <span class="value" id="normDomain">-</span></div>
     <div class="row"><span class="label">상태</span> <span class="value" id="statusText">대기중</span></div>
   </div>
 
@@ -47,17 +47,18 @@
 
   <script>
     const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
+
     const DOMAIN_SHEET_NAME = 'domain';
     const DATA_SHEET_NAME = 'data';
 
     const DOMAIN_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(DOMAIN_SHEET_NAME)}`;
     const DATA_URL   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(DATA_SHEET_NAME)}`;
 
-    // domain 시트: [거래처명, 도메인] -> 도메인=1
+    // domain 시트: 예) [거래처명, 도메인] -> 도메인=1
     const DOMAIN_COL_INDEX_IN_DOMAIN_SHEET = 1;
 
-    // data 시트: A열=도메인 -> 도메인=0
-    const DOMAIN_COL_INDEX_IN_DATA_SHEET = 0;
+    // data 시트: A열에 "a@tidesquare.com" 같은 값이 들어있음 -> A=0
+    const KEY_COL_INDEX_IN_DATA_SHEET = 0;
 
     // 첫 행이 헤더면 true
     const FIRST_ROW_IS_HEADER = true;
@@ -91,57 +92,52 @@
     async function run() {
       clearError();
       clearData();
+      setDebug("");
       setStatus("불러오는 중...", "warn");
       setDomainStatus("-");
       setDataStatus("-");
-      setDebug("");
 
       try {
-        const { fromEmail, fromDomainRaw } = getFromInfo();
-        const fromDomain = normalizeDomain(fromDomainRaw);
-
+        const { fromEmail, fromDomain } = getFromInfo();
         document.getElementById('fromEmail').textContent = fromEmail || '(없음)';
-        document.getElementById('fromDomain').textContent = fromDomainRaw || '(없음)';
-        document.getElementById('normDomain').textContent = fromDomain || '(없음)';
+        document.getElementById('fromDomain').textContent = fromDomain || '(없음)';
 
         if (!fromDomain) {
           setStatus("발신자 도메인을 읽지 못했습니다.", "warn");
           return;
         }
 
-        // 1) domain 시트에서 등록 여부 확인
+        // 1) domain 시트에서 "도메인 등록 여부" 체크
         const domainTable = await fetchGvizTable(DOMAIN_URL);
         let domainRows = domainTable.rows;
         if (FIRST_ROW_IS_HEADER && domainRows.length) domainRows = domainRows.slice(1);
 
-        const isAllowed = !!findRowByDomain(domainRows, fromDomain, DOMAIN_COL_INDEX_IN_DOMAIN_SHEET);
-
-        if (!isAllowed) {
+        const allowed = !!findRowByDomain(domainRows, fromDomain, DOMAIN_COL_INDEX_IN_DOMAIN_SHEET);
+        if (!allowed) {
           setDomainStatus(`미등록 (${fromDomain})`, "warn");
           setStatus("등록되지 않은 도메인이라 data 표시를 생략합니다.", "warn");
           return;
         }
-
         setDomainStatus(`등록됨 (${fromDomain})`, "ok");
 
-        // 2) data 시트에서 매칭 행 찾기
+        // 2) data 시트에서 "A열 값(이메일/도메인)" -> 도메인으로 정규화 후 매칭
         const dataTable = await fetchGvizTable(DATA_URL);
         let dataRows = dataTable.rows;
         if (FIRST_ROW_IS_HEADER && dataRows.length) dataRows = dataRows.slice(1);
 
-        // 디버그: data 시트 A열 도메인 상위 10개 정규화해서 보여주기
+        // 디버그: 상위 10개 key 값이 어떻게 도메인으로 변환되는지 보여줌
         const sample = dataRows.slice(0, 10).map(r => {
-          const raw = String(r[DOMAIN_COL_INDEX_IN_DATA_SHEET] ?? '');
-          const norm = normalizeDomain(raw);
-          return `- raw: "${raw}"  -> norm: "${norm}"`;
+          const raw = String(r[KEY_COL_INDEX_IN_DATA_SHEET] ?? '');
+          const norm = normalizeToDomain(raw);
+          return `- raw: "${raw}"  -> domain: "${norm}"`;
         }).join("\n");
-        setDebug("data 시트 도메인 샘플(상위 10개):\n" + sample);
+        setDebug("data 시트 A열 샘플(상위 10개) 정규화:\n" + sample);
 
-        const matchedDataRow = findRowByDomain(dataRows, fromDomain, DOMAIN_COL_INDEX_IN_DATA_SHEET);
+        const matchedDataRow = findRowByDomainUsingKeyCol(dataRows, fromDomain, KEY_COL_INDEX_IN_DATA_SHEET);
 
         if (!matchedDataRow) {
           setDataStatus(`매칭 없음 (${fromDomain})`, "warn");
-          setStatus("domain에는 있지만 data에는 해당 도메인이 없거나 형식이 다릅니다.", "warn");
+          setStatus("data 시트 A열 값이 이메일/도메인이지만, 도메인 변환 후에도 일치가 없습니다.", "warn");
           return;
         }
 
@@ -161,43 +157,32 @@
       if (!item) throw new Error("Office.context.mailbox.item 이 없습니다.");
 
       const fromEmail = item?.from?.emailAddress || '';
-      const fromDomainRaw = extractDomain(fromEmail);
-      return { fromEmail, fromDomainRaw };
+      const fromDomain = normalizeToDomain(fromEmail); // 이메일을 도메인으로
+      return { fromEmail, fromDomain };
     }
 
-    function extractDomain(email) {
-      if (!email) return '';
-      const at = email.lastIndexOf('@');
-      if (at === -1) return '';
-      return email.slice(at + 1).trim();
-    }
-
-    // ✅ 매칭 핵심: 도메인 문자열 정규화
-    function normalizeDomain(value) {
+    // ✅ 입력이 이메일이든 도메인이든 "도메인"으로 변환
+    function normalizeToDomain(value) {
       if (value == null) return '';
       let s = String(value);
 
-      // 특수공백/줄바꿈 포함한 공백 제거
-      s = s.replace(/\u00A0/g, ' ');     // nbsp
-      s = s.trim().toLowerCase();
+      // nbsp 제거 + trim
+      s = s.replace(/\u00A0/g, ' ').trim().toLowerCase();
 
-      // 값이 "user@test.com"처럼 이메일이면 도메인만 뽑기
-      if (s.includes('@')) {
-        const at = s.lastIndexOf('@');
-        s = s.slice(at + 1).trim();
-      }
-
-      // "test.com/" 같은 경우 슬래시 이후 제거
-      s = s.replace(/\/.*$/, '');
-
-      // "test.com, ..." 같은 경우 콤마 이후 제거
-      s = s.replace(/,.*$/, '');
-
-      // 프로토콜이 섞이면 제거
+      // 프로토콜 제거
       s = s.replace(/^https?:\/\//, '');
 
-      // 앞에 점/골뱅이 같은 것 제거
+      // 콤마/슬래시 이후 제거
+      s = s.replace(/,.*$/, '');
+      s = s.replace(/\/.*$/, '');
+
+      // 앞에 @ . 제거
       s = s.replace(/^[.@]+/, '');
+
+      // 이메일이면 @ 뒤만 취함
+      if (s.includes('@')) {
+        s = s.slice(s.lastIndexOf('@') + 1).trim();
+      }
 
       return s;
     }
@@ -219,19 +204,30 @@
       return { headers, rows };
     }
 
-    function findRowByDomain(rows, domainNormalized, domainColIndex) {
-      const d = normalizeDomain(domainNormalized);
+    // domain 시트 쪽: 셀 값이 도메인이라고 가정하지만 그래도 도메인 정규화 적용
+    function findRowByDomain(rows, domain, domainColIndex) {
+      const d = normalizeToDomain(domain);
       for (const row of rows) {
-        const cellRaw = row[domainColIndex];
-        const cell = normalizeDomain(cellRaw);
+        const cell = normalizeToDomain(row[domainColIndex]);
         if (!cell) continue;
-
-        // 정확 일치
         if (cell === d) return row;
+        if (d.endsWith('.' + cell)) return row;  // mail.test.com -> test.com
+        if (cell.endsWith('.' + d)) return row;
+      }
+      return null;
+    }
 
-        // 서브도메인 허용(예: mail.test.com -> test.com)
-        if (cell && d.endsWith('.' + cell)) return row;
-        if (d && cell.endsWith('.' + d)) return row; // 반대 케이스도 안전하게
+    // data 시트 쪽: A열 key(이메일/도메인)를 도메인으로 변환해서 비교
+    function findRowByDomainUsingKeyCol(rows, domain, keyColIndex) {
+      const d = normalizeToDomain(domain);
+      for (const row of rows) {
+        const keyRaw = row[keyColIndex];
+        const keyDomain = normalizeToDomain(keyRaw);
+        if (!keyDomain) continue;
+
+        if (keyDomain === d) return row;
+        if (d.endsWith('.' + keyDomain)) return row;
+        if (keyDomain.endsWith('.' + d)) return row;
       }
       return null;
     }
