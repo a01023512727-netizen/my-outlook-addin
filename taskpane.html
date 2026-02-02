@@ -6,23 +6,19 @@
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; background-color: #ffffff; }
-        .header { color: #2b579a; font-size: 16px; font-weight: bold; margin-bottom: 12px; display: flex; align-items: center; border-bottom: 2px solid #2b579a; padding-bottom: 5px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
-        th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
+        .header { color: #2b579a; font-size: 16px; font-weight: bold; margin-bottom: 12px; border-bottom: 2px solid #2b579a; padding-bottom: 5px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid #e0e0e0; }
+        th { background-color: #f3f3f3; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
         td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
         tr:nth-child(even) { background-color: #fafafa; }
-        tr:hover { background-color: #f0f7ff; }
-        .loading { color: #666; font-size: 13px; font-style: italic; }
     </style>
 </head>
 <body>
     <div class="header">📊 실시간 시트 데이터</div>
-    <div id="table-container" class="loading">데이터를 불러오는 중...</div>
+    <div id="table-container">데이터를 불러오는 중...</div>
 
     <script>
-        // 사용자님이 주신 주소에서 추출한 ID입니다.
-        const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
-        // 구글 시트 데이터를 JSON으로 가져오는 마법의 주소
+        const SHEET_ID = '1-pU1y5i0p6z_Q9O-p_U-mQ_Y_v7-z_v-p_U-mQ_Y_v7';
         const DATA_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
 
         Office.onReady(() => {
@@ -33,37 +29,24 @@
             try {
                 const res = await fetch(DATA_URL);
                 const text = await res.text();
-                
-                // 구글 JSON의 불필요한 앞뒤 텍스트 제거
-                const jsonText = text.substring(47).slice(0, -2);
-                const json = JSON.parse(jsonText);
+                const json = JSON.parse(text.substring(47).slice(0, -2));
                 
                 let tableHtml = '<table><thead><tr>';
-                
-                // 1. 헤더(제목줄) 만들기
-                json.table.cols.forEach(col => {
-                    tableHtml += `<th>${col.label || ''}</th>`;
-                });
+                json.table.cols.forEach(col => tableHtml += `<th>${col.label || ''}</th>`);
                 tableHtml += '</tr></thead><tbody>';
 
-                // 2. 데이터 줄 만들기
                 json.table.rows.forEach(row => {
                     tableHtml += '<tr>';
                     row.c.forEach(cell => {
-                        // 셀 값이 비어있을 경우 처리
                         const value = cell ? (cell.f ? cell.f : cell.v) : '';
                         tableHtml += `<td>${value}</td>`;
                     });
                     tableHtml += '</tr>';
                 });
-                
                 tableHtml += '</tbody></table>';
-                document.getElementById('table-container').classList.remove('loading');
                 document.getElementById('table-container').innerHTML = tableHtml;
             } catch (err) {
-                console.error(err);
-                document.getElementById('table-container').innerHTML = 
-                    "데이터 로드 실패. 시트의 [파일 > 공유 > 웹에 게시]가 되어있는지 다시 확인해주세요.";
+                document.getElementById('table-container').innerHTML = "데이터 로드 실패. 시트 설정을 확인하세요.";
             }
         }
     </script>
