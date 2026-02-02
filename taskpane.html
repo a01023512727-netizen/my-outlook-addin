@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>구글 시트 뷰어</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; background-color: #f9f9f9; }
+        .header { color: #2b579a; font-size: 18px; font-weight: bold; margin-bottom: 15px; border-bottom: 2px solid #2b579a; padding-bottom: 5px; }
+        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
+        th { background-color: #f2f2f2; color: #333; }
+        tr:hover { background-color: #f5f5f5; }
+    </style>
+</head>
+<body>
+    <div class="header">📊 실시간 시트 데이터</div>
+    <div id="table-container">데이터를 불러오는 중...</div>
+
+    <script>
+        // 중요: 본인의 구글 시트 주소창에서 ID를 복사해 아래에 넣으세요.
+        const SHEET_ID = '여기에_복사한_ID를_넣으세요'; 
+        const DATA_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
+
+        Office.onReady(() => {
+            loadSheetData();
+        });
+
+        async function loadSheetData() {
+            try {
+                const res = await fetch(DATA_URL);
+                const text = await res.text();
+                // 구글 JSON 형식을 정리하는 과정
+                const json = JSON.parse(text.substring(47).slice(0, -2));
+                
+                let tableHtml = '<table><thead><tr>';
+                json.table.cols.forEach(col => tableHtml += `<th>${col.label || ''}</th>`);
+                tableHtml += '</tr></thead><tbody>';
+
+                json.table.rows.forEach(row => {
+                    tableHtml += '<tr>';
+                    row.c.forEach(cell => tableHtml += `<td>${cell ? cell.v : ''}</td>`);
+                    tableHtml += '</tr>';
+                });
+                tableHtml += '</tbody></table>';
+                
+                document.getElementById('table-container').innerHTML = tableHtml;
+            } catch (err) {
+                document.getElementById('table-container').innerHTML = "데이터를 로드할 수 없습니다. '웹에 게시' 설정을 확인하세요.";
+            }
+        }
+    </script>
+</body>
+</html>
