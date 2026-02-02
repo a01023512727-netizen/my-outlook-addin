@@ -2,104 +2,164 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>구글 시트 뷰어</title>
+  <title>거래처 매칭 뷰어</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <style>
-    body { font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; background-color: #ffffff; }
-    .header { color: #2b579a; font-size: 16px; font-weight: bold; margin-bottom: 12px; display: flex; align-items: center; border-bottom: 2px solid #2b579a; padding-bottom: 5px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
-    th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
-    td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
-    tr:nth-child(even) { background-color: #fafafa; }
-    tr:hover { background-color: #f0f7ff; }
-    .loading { color: #666; font-size: 13px; font-style: italic; }
-    .error { color: #b00020; font-size: 12px; white-space: pre-wrap; line-height: 1.4; }
+    body { font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; background: #fff; }
+    .header { color: #2b579a; font-size: 16px; font-weight: 700; border-bottom: 2px solid #2b579a; padding-bottom: 6px; margin-bottom: 12px; }
+    .box { border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+    .row { margin: 6px 0; font-size: 13px; }
+    .label { color:#666; display:inline-block; width: 120px; }
+    .value { font-weight: 700; }
+    .ok { color: #0a7a0a; }
+    .warn { color: #b36b00; }
+    .err { color: #b00020; white-space: pre-wrap; font-size: 12px; }
+    button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
   </style>
 </head>
 <body>
-  <div class="header">📊 실시간 시트 데이터</div>
-  <div id="table-container" class="loading">데이터를 불러오는 중...</div>
+  <div class="header">📩 거래처 도메인 매칭</div>
+
+  <div class="box" id="mailBox">
+    <div class="row"><span class="label">발신자 이메일</span> <span class="value" id="fromEmail">-</span></div>
+    <div class="row"><span class="label">발신자 도메인</span> <span class="value" id="fromDomain">-</span></div>
+  </div>
+
+  <div class="box" id="matchBox">
+    <div class="row"><span class="label">담당자</span> <span class="value" id="ownerName">-</span></div>
+    <div class="row"><span class="label">직급</span> <span class="value" id="ownerTitle">-</span></div>
+    <div class="row" id="statusRow"><span class="label">상태</span> <span class="value" id="statusText">대기중</span></div>
+  </div>
+
+  <button id="btnRefresh">새로고침</button>
+  <div class="err" id="error" style="margin-top:10px;"></div>
 
   <script>
+    // ✅ 네 구글 시트 ID
     const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
-    const DATA_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
+
+    // ✅ Sheet2 이름(탭 이름) 정확히 맞춰줘
+    const SHEET2_NAME = 'Sheet2';
+
+    // gviz 쿼리: 특정 시트의 모든 값을 JSON으로
+    // sheet= 탭이름을 넣으면 해당 시트만 가져올 수 있어요.
+    const SHEET2_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET2_NAME)}`;
 
     Office.onReady(() => {
-      loadSheetData();
+      document.getElementById('btnRefresh').addEventListener('click', run);
+      run();
     });
 
-    async function loadSheetData() {
-      const container = document.getElementById('table-container');
+    async function run() {
+      clearError();
+      setStatus('불러오는 중...', 'warn');
 
       try {
-        const res = await fetch(DATA_URL, {
-          method: "GET",
-          // Outlook 환경에서 리다이렉트가 개입하는 경우를 대비
-          redirect: "follow",
-          cache: "no-store"
-        });
+        const { fromEmail, fromDomain } = getFromInfo();
+        document.getElementById('fromEmail').textContent = fromEmail || '(없음)';
+        document.getElementById('fromDomain').textContent = fromDomain || '(없음)';
 
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        if (!fromDomain) {
+          setStatus('발신자 도메인을 읽지 못했습니다.', 'warn');
+          return;
         }
 
-        const text = await res.text();
+        // Sheet2 로드 후 매칭
+        const rows = await fetchGvizRows(SHEET2_URL);
 
-        // gviz 응답이 아닌 경우(로그인 페이지/차단/에러 HTML)도 잡아내기
-        if (!text || text.length < 60) {
-          throw new Error("응답이 너무 짧습니다. (차단 또는 빈 응답)");
+        // Sheet2 컬럼 가정: [도메인, 담당자, 직급]
+        const matched = findDomainRow(rows, fromDomain);
+
+        if (!matched) {
+          document.getElementById('ownerName').textContent = '-';
+          document.getElementById('ownerTitle').textContent = '-';
+          setStatus(`매칭 없음: ${fromDomain}`, 'warn');
+          return;
         }
-        if (!text.startsWith("/*O_o*/") && text.indexOf("google.visualization") === -1) {
-          // 가끔 HTML이 떨어지는 경우가 있어 디버그를 위해 앞부분을 노출
-          throw new Error("예상한 gviz 응답 형식이 아닙니다.\n응답 앞부분:\n" + text.slice(0, 200));
-        }
 
-        // 구글 JSON의 불필요한 앞뒤 텍스트 제거
-        const jsonText = text.substring(47).slice(0, -2);
-        const json = JSON.parse(jsonText);
+        const [domain, name, title] = matched;
+        document.getElementById('ownerName').textContent = name || '-';
+        document.getElementById('ownerTitle').textContent = title || '-';
+        setStatus(`매칭 성공: ${domain}`, 'ok');
 
-        let tableHtml = '<table><thead><tr>';
-
-        json.table.cols.forEach(col => {
-          tableHtml += `<th>${escapeHtml(col.label || '')}</th>`;
-        });
-        tableHtml += '</tr></thead><tbody>';
-
-        json.table.rows.forEach(row => {
-          tableHtml += '<tr>';
-          row.c.forEach(cell => {
-            const value = cell ? (cell.f ? cell.f : cell.v) : '';
-            tableHtml += `<td>${escapeHtml(String(value ?? ''))}</td>`;
-          });
-          tableHtml += '</tr>';
-        });
-
-        tableHtml += '</tbody></table>';
-
-        container.classList.remove('loading');
-        container.innerHTML = tableHtml;
-
-      } catch (err) {
-        console.error(err);
-        container.classList.remove('loading');
-        container.classList.add('error');
-        container.innerHTML =
-          "데이터 로드 실패.\n\n" +
-          "에러 메시지:\n" + (err && err.message ? err.message : String(err)) + "\n\n" +
-          "힌트:\n" +
-          "- Outlook Add-in은 외부 도메인 요청이 제한될 수 있어요.\n" +
-          "- manifest의 AppDomains에 docs.google.com 뿐 아니라 docs.googleusercontent.com도 필요할 수 있어요.\n" +
-          "- 시트가 [파일 > 공유 > 웹에 게시] 되어 있는지도 확인해주세요.";
+      } catch (e) {
+        showError(e);
+        setStatus('에러 발생', 'warn');
       }
     }
 
-    function escapeHtml(s) {
-      return s
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+    function getFromInfo() {
+      // Read 모드에서 from 정보
+      const item = Office.context.mailbox.item;
+      const from = item?.from;
+      const fromEmail = from?.emailAddress || '';
+
+      const fromDomain = extractDomain(fromEmail);
+      return { fromEmail, fromDomain };
+    }
+
+    function extractDomain(email) {
+      if (!email) return '';
+      const at = email.lastIndexOf('@');
+      if (at === -1) return '';
+      return email.slice(at + 1).trim().toLowerCase();
+    }
+
+    async function fetchGvizRows(url) {
+      // Outlook 환경에서 리다이렉트 포함될 수 있어 follow 권장
+      const res = await fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store' });
+      if (!res.ok) throw new Error(`Sheet fetch failed: HTTP ${res.status} ${res.statusText}`);
+
+      const text = await res.text();
+
+      // gviz JSON 부분만 잘라내기
+      const jsonText = text.substring(47).slice(0, -2);
+      const json = JSON.parse(jsonText);
+
+      // rows -> 2차원 배열로 변환
+      // row.c: 각 셀 {v, f} 형태
+      const rows = (json.table.rows || []).map(r => (r.c || []).map(cell => {
+        if (!cell) return '';
+        return (cell.f != null ? cell.f : cell.v) ?? '';
+      }));
+
+      // 첫 행이 헤더라면 제거하고 싶으면 여기서 처리 가능
+      // (필요하면 주석 해제)
+      // if (rows.length && rows[0][0] && String(rows[0][0]).includes('도메인')) rows.shift();
+
+      return rows;
+    }
+
+    function findDomainRow(rows, domain) {
+      const d = domain.toLowerCase();
+      for (const row of rows) {
+        const key = String(row[0] ?? '').trim().toLowerCase();
+        if (!key) continue;
+
+        // 정확히 일치
+        if (key === d) return [key, row[1], row[2]];
+
+        // "test.com"이 row에 "mail.test.com"처럼 들어간 경우까지 허용하고 싶다면:
+        // if (d.endsWith(key)) return [key, row[1], row[2]];
+      }
+      return null;
+    }
+
+    function setStatus(text, tone) {
+      const el = document.getElementById('statusText');
+      el.textContent = text;
+      el.classList.remove('ok', 'warn');
+      if (tone) el.classList.add(tone);
+    }
+
+    function showError(e) {
+      console.error(e);
+      const msg = (e && e.message) ? e.message : String(e);
+      document.getElementById('error').textContent = `에러:\n${msg}`;
+    }
+
+    function clearError() {
+      document.getElementById('error').textContent = '';
     }
   </script>
 </body>
