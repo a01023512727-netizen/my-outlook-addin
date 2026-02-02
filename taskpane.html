@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>거래처 매칭 뷰어</title>
+  <title>거래처 도메인 매칭</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <style>
     body { font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; background: #fff; }
@@ -13,22 +13,26 @@
     .value { font-weight: 700; }
     .ok { color: #0a7a0a; }
     .warn { color: #b36b00; }
-    .err { color: #b00020; white-space: pre-wrap; font-size: 12px; }
+    .err { color: #b00020; white-space: pre-wrap; font-size: 12px; line-height: 1.4; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
+    th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
+    td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
+    tr:nth-child(even) { background-color: #fafafa; }
     button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
   </style>
 </head>
 <body>
   <div class="header">📩 거래처 도메인 매칭</div>
 
-  <div class="box" id="mailBox">
+  <div class="box">
     <div class="row"><span class="label">발신자 이메일</span> <span class="value" id="fromEmail">-</span></div>
     <div class="row"><span class="label">발신자 도메인</span> <span class="value" id="fromDomain">-</span></div>
+    <div class="row"><span class="label">상태</span> <span class="value" id="statusText">대기중</span></div>
   </div>
 
-  <div class="box" id="matchBox">
-    <div class="row"><span class="label">담당자</span> <span class="value" id="ownerName">-</span></div>
-    <div class="row"><span class="label">직급</span> <span class="value" id="ownerTitle">-</span></div>
-    <div class="row" id="statusRow"><span class="label">상태</span> <span class="value" id="statusText">대기중</span></div>
+  <div class="box">
+    <div class="row"><span class="label">Sheet1 매칭</span> <span class="value" id="matchTitle">-</span></div>
+    <div id="matchTable"></div>
   </div>
 
   <button id="btnRefresh">새로고침</button>
@@ -38,21 +42,50 @@
     // ✅ 네 구글 시트 ID
     const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
 
-    // ✅ Sheet2 이름(탭 이름) 정확히 맞춰줘
-    const SHEET2_NAME = 'Sheet2';
+    // ✅ "첫번째 sheet(탭) 이름"을 정확히 적어줘 (예: Sheet1, 거래처, 고객목록 등)
+    const SHEET1_NAME = 'domain';
 
-    // gviz 쿼리: 특정 시트의 모든 값을 JSON으로
-    // sheet= 탭이름을 넣으면 해당 시트만 가져올 수 있어요.
-    const SHEET2_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET2_NAME)}`;
+    // gviz URL (Sheet1 전체를 JSON으로 가져옴)
+    const SHEET1_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET1_NAME)}`;
 
-    Office.onReady(() => {
-      document.getElementById('btnRefresh').addEventListener('click', run);
-      run();
-    });
+    // Sheet1에서 "도메인 컬럼"이 몇 번째인지(0부터 시작)
+    // 네 예시: A거래처 / test.com  => [거래처명, 도메인] 이면 도메인은 1번 인덱스
+    const DOMAIN_COL_INDEX = 2;
+
+    // 첫 행을 헤더로 쓸지 여부 (Sheet1 첫 줄이 제목줄이면 true 추천)
+    const FIRST_ROW_IS_HEADER = true;
+
+    document.getElementById('btnRefresh').addEventListener('click', run);
+
+    if (typeof Office === 'undefined') {
+      showError("Office.js 컨텍스트가 없습니다. Outlook Add-in 안에서 열어주세요.");
+      setStatus("Outlook에서 열어주세요", "warn");
+    } else {
+      Office.onReady(() => {
+        // Outlook 컨텍스트 준비 확인 후 실행
+        if (!isOutlookContextReady()) {
+          setStatus("Outlook 컨텍스트 준비 중...", "warn");
+          setTimeout(() => {
+            if (isOutlookContextReady()) run();
+            else {
+              showError("Office.context.mailbox.item 이 없습니다. 메일 읽기 화면에서 Add-in을 열어주세요.");
+              setStatus("Outlook 컨텍스트 없음", "warn");
+            }
+          }, 600);
+          return;
+        }
+        run();
+      });
+    }
+
+    function isOutlookContextReady() {
+      return !!(Office && Office.context && Office.context.mailbox && Office.context.mailbox.item);
+    }
 
     async function run() {
       clearError();
-      setStatus('불러오는 중...', 'warn');
+      clearMatch();
+      setStatus("불러오는 중...", "warn");
 
       try {
         const { fromEmail, fromDomain } = getFromInfo();
@@ -60,40 +93,46 @@
         document.getElementById('fromDomain').textContent = fromDomain || '(없음)';
 
         if (!fromDomain) {
-          setStatus('발신자 도메인을 읽지 못했습니다.', 'warn');
+          setStatus("발신자 도메인을 읽지 못했습니다.", "warn");
           return;
         }
 
-        // Sheet2 로드 후 매칭
-        const rows = await fetchGvizRows(SHEET2_URL);
+        // ✅ Sheet1에서 “도메인 매칭된 행 1개”만 찾기
+        const sheet1 = await fetchGvizTable(SHEET1_URL);
 
-        // Sheet2 컬럼 가정: [도메인, 담당자, 직급]
-        const matched = findDomainRow(rows, fromDomain);
+        // 헤더(컬럼명) & 데이터
+        const headers = sheet1.headers; // [{label, ...}]
+        let rows = sheet1.rows;         // 2차원 배열
 
-        if (!matched) {
-          document.getElementById('ownerName').textContent = '-';
-          document.getElementById('ownerTitle').textContent = '-';
-          setStatus(`매칭 없음: ${fromDomain}`, 'warn');
+        // 첫 행이 헤더면 제거(표시용 헤더는 headers.label 사용)
+        if (FIRST_ROW_IS_HEADER && rows.length) {
+          rows = rows.slice(1);
+        }
+
+        const matchedRow = findRowByDomain(rows, fromDomain, DOMAIN_COL_INDEX);
+
+        if (!matchedRow) {
+          document.getElementById('matchTitle').textContent = "매칭 없음";
+          setStatus(`Sheet1에 ${fromDomain} 이(가) 없습니다`, "warn");
           return;
         }
 
-        const [domain, name, title] = matched;
-        document.getElementById('ownerName').textContent = name || '-';
-        document.getElementById('ownerTitle').textContent = title || '-';
-        setStatus(`매칭 성공: ${domain}`, 'ok');
+        document.getElementById('matchTitle').textContent = "매칭됨 ✅";
+        renderSingleRowTable(headers, matchedRow);
+        setStatus(`표시 완료: ${fromDomain}`, "ok");
 
       } catch (e) {
-        showError(e);
-        setStatus('에러 발생', 'warn');
+        console.error(e);
+        showError((e && e.message) ? e.message : String(e));
+        setStatus("에러 발생", "warn");
       }
     }
 
     function getFromInfo() {
-      // Read 모드에서 from 정보
-      const item = Office.context.mailbox.item;
-      const from = item?.from;
-      const fromEmail = from?.emailAddress || '';
+      const item = Office?.context?.mailbox?.item;
+      if (!item) throw new Error("Office.context.mailbox.item 이 없습니다.");
 
+      const fromEmail = item?.from?.emailAddress || '';
       const fromDomain = extractDomain(fromEmail);
       return { fromEmail, fromDomain };
     }
@@ -105,44 +144,58 @@
       return email.slice(at + 1).trim().toLowerCase();
     }
 
-    async function fetchGvizRows(url) {
-      // Outlook 환경에서 리다이렉트 포함될 수 있어 follow 권장
+    async function fetchGvizTable(url) {
       const res = await fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store' });
       if (!res.ok) throw new Error(`Sheet fetch failed: HTTP ${res.status} ${res.statusText}`);
 
       const text = await res.text();
-
-      // gviz JSON 부분만 잘라내기
       const jsonText = text.substring(47).slice(0, -2);
       const json = JSON.parse(jsonText);
 
-      // rows -> 2차원 배열로 변환
-      // row.c: 각 셀 {v, f} 형태
+      const headers = (json.table.cols || []).map(c => ({
+        label: c.label || ''
+      }));
+
       const rows = (json.table.rows || []).map(r => (r.c || []).map(cell => {
         if (!cell) return '';
         return (cell.f != null ? cell.f : cell.v) ?? '';
       }));
 
-      // 첫 행이 헤더라면 제거하고 싶으면 여기서 처리 가능
-      // (필요하면 주석 해제)
-      // if (rows.length && rows[0][0] && String(rows[0][0]).includes('도메인')) rows.shift();
-
-      return rows;
+      return { headers, rows };
     }
 
-    function findDomainRow(rows, domain) {
+    function findRowByDomain(rows, domain, domainColIndex) {
       const d = domain.toLowerCase();
       for (const row of rows) {
-        const key = String(row[0] ?? '').trim().toLowerCase();
-        if (!key) continue;
+        const cell = String(row[domainColIndex] ?? '').trim().toLowerCase();
+        if (!cell) continue;
 
-        // 정확히 일치
-        if (key === d) return [key, row[1], row[2]];
+        // 정확 일치
+        if (cell === d) return row;
 
-        // "test.com"이 row에 "mail.test.com"처럼 들어간 경우까지 허용하고 싶다면:
-        // if (d.endsWith(key)) return [key, row[1], row[2]];
+        // 서브도메인까지 허용하고 싶으면(예: mail.test.com → test.com)
+        // if (cell === d || d.endsWith('.' + cell)) return row;
       }
       return null;
+    }
+
+    function renderSingleRowTable(headers, row) {
+      // 헤더 라벨은 gviz cols.label 기반(시트 첫 줄 헤더와는 별개)
+      // cols.label이 비어 있으면 A,B,C…처럼 처리하기
+      const ths = headers.map((h, idx) => `<th>${escapeHtml(h.label || `COL${idx+1}`)}</th>`).join('');
+      const tds = row.map(v => `<td>${escapeHtml(String(v ?? ''))}</td>`).join('');
+
+      document.getElementById('matchTable').innerHTML = `
+        <table>
+          <thead><tr>${ths}</tr></thead>
+          <tbody><tr>${tds}</tr></tbody>
+        </table>
+      `;
+    }
+
+    function clearMatch() {
+      document.getElementById('matchTitle').textContent = '-';
+      document.getElementById('matchTable').innerHTML = '';
     }
 
     function setStatus(text, tone) {
@@ -152,14 +205,21 @@
       if (tone) el.classList.add(tone);
     }
 
-    function showError(e) {
-      console.error(e);
-      const msg = (e && e.message) ? e.message : String(e);
-      document.getElementById('error').textContent = `에러:\n${msg}`;
+    function showError(msg) {
+      document.getElementById('error').textContent = msg;
     }
 
     function clearError() {
       document.getElementById('error').textContent = '';
+    }
+
+    function escapeHtml(s) {
+      return s
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
     }
   </script>
 </body>
