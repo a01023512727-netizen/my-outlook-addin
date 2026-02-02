@@ -14,13 +14,11 @@
     .ok { color: #0a7a0a; }
     .warn { color: #b36b00; }
     .err { color: #b00020; white-space: pre-wrap; font-size: 12px; line-height: 1.4; }
-
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
     th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
     td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
-
-    button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
     .muted { color:#777; font-size:12px; white-space:pre-wrap; margin-top:8px; }
+    button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -33,12 +31,8 @@
   </div>
 
   <div class="box">
-    <div class="row"><span class="label">domain 시트</span> <span class="value" id="domainStatus">-</span></div>
-  </div>
-
-  <div class="box">
-    <div class="row"><span class="label">data 시트</span> <span class="value" id="dataStatus">-</span></div>
-    <div id="dataTable"></div>
+    <div class="row"><span class="label">data 매칭</span> <span class="value" id="dataStatus">-</span></div>
+    <div id="dataCard"></div>
     <div class="muted" id="debug"></div>
   </div>
 
@@ -47,21 +41,16 @@
 
   <script>
     const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
-
-    const DOMAIN_SHEET_NAME = 'domain';
     const DATA_SHEET_NAME = 'data';
+    const DATA_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(DATA_SHEET_NAME)}`;
 
-    const DOMAIN_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(DOMAIN_SHEET_NAME)}`;
-    const DATA_URL   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(DATA_SHEET_NAME)}`;
+    // 너 구조: A=키(이메일/도메인), B=이름, C=나이
+    const KEY_COL = 0;
+    const NAME_COL = 1;
+    const AGE_COL = 2;
 
-    // domain 시트: 예) [거래처명, 도메인] -> 도메인=1
-    const DOMAIN_COL_INDEX_IN_DOMAIN_SHEET = 1;
-
-    // data 시트: A열에 "a@tidesquare.com" 같은 값이 들어있음 -> A=0
-    const KEY_COL_INDEX_IN_DATA_SHEET = 0;
-
-    // 첫 행이 헤더면 true
-    const FIRST_ROW_IS_HEADER = true;
+    // data 시트에 헤더(제목줄) 없다고 했으니 false 추천
+    const FIRST_ROW_IS_HEADER = false;
 
     document.getElementById('btnRefresh').addEventListener('click', run);
 
@@ -70,32 +59,14 @@
       setStatus("Outlook에서 열어주세요", "warn");
     } else {
       Office.onReady(() => {
-        if (!isOutlookContextReady()) {
-          setStatus("Outlook 컨텍스트 준비 중...", "warn");
-          setTimeout(() => {
-            if (isOutlookContextReady()) run();
-            else {
-              showError("Office.context.mailbox.item 이 없습니다. 메일 읽기 화면에서 Add-in을 열어주세요.");
-              setStatus("Outlook 컨텍스트 없음", "warn");
-            }
-          }, 600);
-          return;
-        }
         run();
       });
     }
 
-    function isOutlookContextReady() {
-      return !!(Office && Office.context && Office.context.mailbox && Office.context.mailbox.item);
-    }
-
     async function run() {
       clearError();
-      clearData();
-      setDebug("");
+      clearUI();
       setStatus("불러오는 중...", "warn");
-      setDomainStatus("-");
-      setDataStatus("-");
 
       try {
         const { fromEmail, fromDomain } = getFromInfo();
@@ -107,43 +78,49 @@
           return;
         }
 
-        // 1) domain 시트에서 "도메인 등록 여부" 체크
-        const domainTable = await fetchGvizTable(DOMAIN_URL);
-        let domainRows = domainTable.rows;
-        if (FIRST_ROW_IS_HEADER && domainRows.length) domainRows = domainRows.slice(1);
+        const table = await fetchGvizTable(DATA_URL);
+        let rows = table.rows;
+        if (FIRST_ROW_IS_HEADER && rows.length) rows = rows.slice(1);
 
-        const allowed = !!findRowByDomain(domainRows, fromDomain, DOMAIN_COL_INDEX_IN_DOMAIN_SHEET);
-        if (!allowed) {
-          setDomainStatus(`미등록 (${fromDomain})`, "warn");
-          setStatus("등록되지 않은 도메인이라 data 표시를 생략합니다.", "warn");
-          return;
-        }
-        setDomainStatus(`등록됨 (${fromDomain})`, "ok");
+        // 핵심: data A열 raw 값 -> 도메인으로 변환해서 fromDomain과 비교
+        const match = findFirstMatchByDomainInA(rows, fromDomain);
 
-        // 2) data 시트에서 "A열 값(이메일/도메인)" -> 도메인으로 정규화 후 매칭
-        const dataTable = await fetchGvizTable(DATA_URL);
-        let dataRows = dataTable.rows;
-        if (FIRST_ROW_IS_HEADER && dataRows.length) dataRows = dataRows.slice(1);
-
-        // 디버그: 상위 10개 key 값이 어떻게 도메인으로 변환되는지 보여줌
-        const sample = dataRows.slice(0, 10).map(r => {
-          const raw = String(r[KEY_COL_INDEX_IN_DATA_SHEET] ?? '');
-          const norm = normalizeToDomain(raw);
-          return `- raw: "${raw}"  -> domain: "${norm}"`;
-        }).join("\n");
-        setDebug("data 시트 A열 샘플(상위 10개) 정규화:\n" + sample);
-
-        const matchedDataRow = findRowByDomainUsingKeyCol(dataRows, fromDomain, KEY_COL_INDEX_IN_DATA_SHEET);
-
-        if (!matchedDataRow) {
+        if (!match) {
           setDataStatus(`매칭 없음 (${fromDomain})`, "warn");
-          setStatus("data 시트 A열 값이 이메일/도메인이지만, 도메인 변환 후에도 일치가 없습니다.", "warn");
+          setStatus("data 시트 A열에서 도메인 매칭 실패", "warn");
+
+          // 디버그: 상위 30개 raw/norm 출력
+          const sample = rows.slice(0, 30).map((r, idx) => {
+            const raw = String(r[KEY_COL] ?? '');
+            const norm = normalizeToDomain(raw);
+            return `${idx+1}. raw="${raw}" -> domain="${norm}"`;
+          }).join("\n");
+          setDebug("data 시트 A열 디버그(상위 30개):\n" + sample);
+
           return;
         }
 
-        setDataStatus(`매칭됨 (${fromDomain})`, "ok");
-        renderSingleRowTable(dataTable.headers, matchedDataRow);
+        const { rowIndex, row, rawKey, normKey } = match;
+        setDataStatus(`매칭됨 (#${rowIndex+1})`, "ok");
         setStatus("표시 완료", "ok");
+
+        const name = row[NAME_COL] ?? '';
+        const age = row[AGE_COL] ?? '';
+        document.getElementById('dataCard').innerHTML = `
+          <table>
+            <thead>
+              <tr><th>KEY(A)</th><th>KEY→도메인</th><th>이름(B)</th><th>나이(C)</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>${escapeHtml(rawKey)}</td>
+                <td>${escapeHtml(normKey)}</td>
+                <td>${escapeHtml(String(name))}</td>
+                <td>${escapeHtml(String(age))}</td>
+              </tr>
+            </tbody>
+          </table>
+        `;
 
       } catch (e) {
         console.error(e);
@@ -154,37 +131,52 @@
 
     function getFromInfo() {
       const item = Office?.context?.mailbox?.item;
-      if (!item) throw new Error("Office.context.mailbox.item 이 없습니다.");
+      if (!item) throw new Error("Office.context.mailbox.item 이 없습니다. (메일 읽기 화면에서 열어주세요)");
 
       const fromEmail = item?.from?.emailAddress || '';
-      const fromDomain = normalizeToDomain(fromEmail); // 이메일을 도메인으로
+      const fromDomain = normalizeToDomain(fromEmail); // 이메일→도메인
       return { fromEmail, fromDomain };
     }
 
-    // ✅ 입력이 이메일이든 도메인이든 "도메인"으로 변환
     function normalizeToDomain(value) {
       if (value == null) return '';
       let s = String(value);
 
-      // nbsp 제거 + trim
-      s = s.replace(/\u00A0/g, ' ').trim().toLowerCase();
-
-      // 프로토콜 제거
+      s = s.replace(/\u00A0/g, ' ').trim().toLowerCase(); // nbsp 제거
       s = s.replace(/^https?:\/\//, '');
-
-      // 콤마/슬래시 이후 제거
       s = s.replace(/,.*$/, '');
       s = s.replace(/\/.*$/, '');
-
-      // 앞에 @ . 제거
       s = s.replace(/^[.@]+/, '');
 
-      // 이메일이면 @ 뒤만 취함
+      // 이메일이면 @ 뒤만
       if (s.includes('@')) {
         s = s.slice(s.lastIndexOf('@') + 1).trim();
       }
 
       return s;
+    }
+
+    function findFirstMatchByDomainInA(rows, fromDomain) {
+      const d = normalizeToDomain(fromDomain);
+
+      for (let i = 0; i < rows.length; i++) {
+        const rawKey = String(rows[i][KEY_COL] ?? '');
+        const keyDomain = normalizeToDomain(rawKey);
+
+        if (!keyDomain) continue;
+
+        // exact
+        if (keyDomain === d) {
+          return { rowIndex: i, row: rows[i], rawKey, normKey: keyDomain };
+        }
+
+        // subdomain tolerant (mail.tidesquare.com vs tidesquare.com)
+        if (d.endsWith('.' + keyDomain) || keyDomain.endsWith('.' + d)) {
+          return { rowIndex: i, row: rows[i], rawKey, normKey: keyDomain };
+        }
+      }
+
+      return null;
     }
 
     async function fetchGvizTable(url) {
@@ -195,68 +187,16 @@
       const jsonText = text.substring(47).slice(0, -2);
       const json = JSON.parse(jsonText);
 
-      const headers = (json.table.cols || []).map((c, idx) => ({ label: c.label || `COL${idx + 1}` }));
       const rows = (json.table.rows || []).map(r => (r.c || []).map(cell => {
         if (!cell) return '';
         return (cell.f != null ? cell.f : cell.v) ?? '';
       }));
 
-      return { headers, rows };
-    }
-
-    // domain 시트 쪽: 셀 값이 도메인이라고 가정하지만 그래도 도메인 정규화 적용
-    function findRowByDomain(rows, domain, domainColIndex) {
-      const d = normalizeToDomain(domain);
-      for (const row of rows) {
-        const cell = normalizeToDomain(row[domainColIndex]);
-        if (!cell) continue;
-        if (cell === d) return row;
-        if (d.endsWith('.' + cell)) return row;  // mail.test.com -> test.com
-        if (cell.endsWith('.' + d)) return row;
-      }
-      return null;
-    }
-
-    // data 시트 쪽: A열 key(이메일/도메인)를 도메인으로 변환해서 비교
-    function findRowByDomainUsingKeyCol(rows, domain, keyColIndex) {
-      const d = normalizeToDomain(domain);
-      for (const row of rows) {
-        const keyRaw = row[keyColIndex];
-        const keyDomain = normalizeToDomain(keyRaw);
-        if (!keyDomain) continue;
-
-        if (keyDomain === d) return row;
-        if (d.endsWith('.' + keyDomain)) return row;
-        if (keyDomain.endsWith('.' + d)) return row;
-      }
-      return null;
-    }
-
-    function renderSingleRowTable(headers, row) {
-      const ths = headers.map(h => `<th>${escapeHtml(h.label || '')}</th>`).join('');
-      const tds = row.map(v => `<td>${escapeHtml(String(v ?? ''))}</td>`).join('');
-
-      document.getElementById('dataTable').innerHTML = `
-        <table>
-          <thead><tr>${ths}</tr></thead>
-          <tbody><tr>${tds}</tr></tbody>
-        </table>
-      `;
-    }
-
-    function clearData() {
-      document.getElementById('dataTable').innerHTML = '';
+      return { rows };
     }
 
     function setStatus(text, tone) {
       const el = document.getElementById('statusText');
-      el.textContent = text;
-      el.classList.remove('ok', 'warn');
-      if (tone) el.classList.add(tone);
-    }
-
-    function setDomainStatus(text, tone) {
-      const el = document.getElementById('domainStatus');
       el.textContent = text;
       el.classList.remove('ok', 'warn');
       if (tone) el.classList.add(tone);
@@ -271,6 +211,12 @@
 
     function setDebug(text) {
       document.getElementById('debug').textContent = text || '';
+    }
+
+    function clearUI() {
+      document.getElementById('dataCard').innerHTML = '';
+      document.getElementById('debug').textContent = '';
+      document.getElementById('dataStatus').textContent = '-';
     }
 
     function showError(msg) {
