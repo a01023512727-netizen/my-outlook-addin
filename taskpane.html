@@ -14,11 +14,18 @@
     .ok { color: #0a7a0a; }
     .warn { color: #b36b00; }
     .err { color: #b00020; white-space: pre-wrap; font-size: 12px; line-height: 1.4; }
+
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
     th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
-    td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
+    td { padding: 8px; border: 1px solid #e0e0e0; color: #555; vertical-align: top; }
+    tr:nth-child(even) { background-color: #fafafa; }
+
     button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
     .muted { color:#777; font-size:12px; white-space:pre-wrap; margin-top:8px; }
+
+    .calc { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+    .calc input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; width: 160px; }
+    .pill { padding: 6px 10px; border-radius: 999px; border: 1px solid #e5e5e5; background: #fafafa; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -33,6 +40,16 @@
   <div class="box">
     <div class="row"><span class="label">조회 결과</span> <span class="value" id="resultStatus">-</span></div>
     <div id="resultTable"></div>
+
+    <div id="calcBox" style="display:none;">
+      <div class="calc">
+        <span class="pill" id="feePill">수수료: -</span>
+        <input id="amountInput" placeholder="금액 입력 (예: 10000)" inputmode="numeric" />
+        <span class="pill" id="resultPill">결과: -</span>
+      </div>
+      <div class="muted" id="calcHint"></div>
+    </div>
+
     <div class="muted" id="debug"></div>
   </div>
 
@@ -40,10 +57,17 @@
   <div class="err" id="error" style="margin-top:10px;"></div>
 
   <script>
-    // ✅ Apps Script 웹앱 URL로 변경
-    const SCRIPT_API_URL = "https://script.google.com/a/macros/tidesquare.com/s/AKfycbyxmuEk8REKFl-eRSe4MYs_nxHkW20ll58EdRpRc8pk8TALr9l-J0lwjUGteVLzdyU/exec";
+    // ✅ 너의 Apps Script 웹앱 URL
+    const SCRIPT_API_URL = "https://script.google.com/macros/s/AAAAAAA/exec";
+
+    // ✅ 수수료 컬럼명 후보(시트 헤더가 뭐가 되든 자동 탐색)
+    const FEE_FIELD_CANDIDATES = ["수수료", "fee", "commission", "rate", "커미션"];
+
+    let currentFeeRate = null; // 0.03 같은 숫자
+    let currentRecord = null;
 
     document.getElementById('btnRefresh').addEventListener('click', run);
+    document.getElementById('amountInput').addEventListener('input', onAmountChange);
 
     Office.onReady(() => {
       try {
@@ -58,6 +82,7 @@
       clearError();
       clearResult();
       setDebug("");
+      hideCalc();
       setStatus("불러오는 중...", "warn");
       setResultStatus("-");
 
@@ -71,9 +96,7 @@
           return;
         }
 
-        // ✅ JSONP 호출 (CORS 우회)
         const json = await callScriptJsonp(fromDomain);
-
         setDebug("응답:\n" + JSON.stringify(json, null, 2));
 
         if (!json.allowed) {
@@ -88,9 +111,28 @@
           return;
         }
 
+        if (!json.record || typeof json.record !== "object") {
+          setResultStatus("응답 형식 오류", "warn");
+          setStatus("Apps Script 응답에 record가 없습니다.", "warn");
+          return;
+        }
+
+        currentRecord = json.record;
+
         setResultStatus("매칭됨 ✅", "ok");
         setStatus("표시 완료", "ok");
-        renderResult(json);
+
+        renderDynamicRecord(json.record);
+
+        // 수수료 찾기 + 계산 박스 활성화
+        const feeRaw = findFeeValue(json.record);
+        const feeRate = parsePercentToRate(feeRaw);
+        if (feeRate != null) {
+          currentFeeRate = feeRate;
+          showCalc(feeRaw, feeRate);
+          // 입력값 유지한 채 재계산
+          onAmountChange();
+        }
 
       } catch (e) {
         console.error(e);
@@ -102,7 +144,6 @@
     function getFromInfo() {
       const item = Office?.context?.mailbox?.item;
       if (!item) throw new Error("Office.context.mailbox.item 이 없습니다. (메일 읽기 화면에서 열어주세요)");
-
       const fromEmail = item?.from?.emailAddress || '';
       const fromDomain = normalizeToDomain(fromEmail);
       return { fromEmail, fromDomain };
@@ -120,7 +161,7 @@
       return s;
     }
 
-    // ✅ JSONP: <script src="...&callback=cb_xxx"> 로드 후 cb 호출
+    // ✅ JSONP 호출
     function callScriptJsonp(domain) {
       return new Promise((resolve, reject) => {
         const cbName = "cb_" + Math.random().toString(36).slice(2);
@@ -129,10 +170,7 @@
           reject(new Error("Apps Script JSONP timeout"));
         }, 12000);
 
-        window[cbName] = (data) => {
-          cleanup();
-          resolve(data);
-        };
+        window[cbName] = (data) => { cleanup(); resolve(data); };
 
         const url =
           `${SCRIPT_API_URL}?domain=${encodeURIComponent(domain)}` +
@@ -142,10 +180,7 @@
         const script = document.createElement("script");
         script.src = url;
         script.async = true;
-        script.onerror = () => {
-          cleanup();
-          reject(new Error("Apps Script JSONP load failed"));
-        };
+        script.onerror = () => { cleanup(); reject(new Error("Apps Script JSONP load failed")); };
 
         document.head.appendChild(script);
 
@@ -157,22 +192,118 @@
       });
     }
 
-    function renderResult(json) {
-      const rows = [
-        ["도메인", json.domain ?? ""],
-        ["이름", json.name ?? ""],
-        ["age", String(json.age ?? "")],
-        ["row", String(json.row ?? "")]
-      ];
+    // ✅ record를 “동적” 항목/값 테이블로 렌더
+    function renderDynamicRecord(record) {
+      const entries = Object.entries(record);
 
-      document.getElementById('resultTable').innerHTML = `
+      const html = `
         <table>
           <thead><tr><th>항목</th><th>값</th></tr></thead>
           <tbody>
-            ${rows.map(([k,v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join("")}
+            ${entries.map(([k, v]) => `
+              <tr>
+                <td>${escapeHtml(k)}</td>
+                <td>${escapeHtml(formatValue(v))}</td>
+              </tr>
+            `).join("")}
           </tbody>
         </table>
       `;
+      document.getElementById('resultTable').innerHTML = html;
+    }
+
+    function formatValue(v) {
+      if (v == null) return "";
+      if (typeof v === "number") return String(v);
+      return String(v);
+    }
+
+    // ✅ 수수료 컬럼 자동 찾기
+    function findFeeValue(record) {
+      // 1) 후보 키로 직접 탐색 (대소문자 무시)
+      const keys = Object.keys(record);
+      for (const cand of FEE_FIELD_CANDIDATES) {
+        const hit = keys.find(k => String(k).trim().toLowerCase() === cand.toLowerCase());
+        if (hit) return record[hit];
+      }
+
+      // 2) 키에 "수수료/fee/commission" 포함하면 그것도 허용
+      const loose = keys.find(k => {
+        const kk = String(k).trim().toLowerCase();
+        return kk.includes("수수료") || kk.includes("fee") || kk.includes("commission") || kk.includes("커미션");
+      });
+      if (loose) return record[loose];
+
+      return null;
+    }
+
+    // "3%" / "0.03" / "3" -> 0.03 로 변환
+    function parsePercentToRate(value) {
+      if (value == null) return null;
+
+      let s = String(value).trim();
+
+      if (!s) return null;
+
+      // "3%" 형태
+      if (s.includes("%")) {
+        s = s.replace("%", "").trim();
+        const n = Number(s.replace(/,/g, ""));
+        if (Number.isFinite(n)) return n / 100;
+        return null;
+      }
+
+      // 숫자
+      const n = Number(s.replace(/,/g, ""));
+      if (!Number.isFinite(n)) return null;
+
+      // 0.03 처럼 1 이하이면 이미 rate로 판단
+      if (n <= 1) return n;
+
+      // 3 처럼 1 초과이면 퍼센트로 판단
+      return n / 100;
+    }
+
+    function showCalc(feeRaw, feeRate) {
+      document.getElementById("calcBox").style.display = "block";
+      document.getElementById("feePill").textContent = `수수료: ${feeRaw} (rate=${feeRate})`;
+      document.getElementById("calcHint").textContent = "금액을 입력하면 수수료 금액을 자동 계산합니다.";
+      currentFeeRate = feeRate;
+    }
+
+    function hideCalc() {
+      document.getElementById("calcBox").style.display = "none";
+      currentFeeRate = null;
+      document.getElementById("feePill").textContent = "수수료: -";
+      document.getElementById("resultPill").textContent = "결과: -";
+      document.getElementById("calcHint").textContent = "";
+    }
+
+    function onAmountChange() {
+      const input = document.getElementById("amountInput").value || "";
+      const amount = parseMoney(input);
+
+      if (currentFeeRate == null || amount == null) {
+        document.getElementById("resultPill").textContent = "결과: -";
+        return;
+      }
+
+      const feeAmount = Math.round(amount * currentFeeRate);
+      document.getElementById("resultPill").textContent =
+        `결과: ${formatMoney(feeAmount)} (입력 ${formatMoney(amount)} × ${(currentFeeRate*100).toFixed(2)}%)`;
+    }
+
+    function parseMoney(text) {
+      const s = String(text).trim();
+      if (!s) return null;
+      const n = Number(s.replace(/,/g, ""));
+      if (!Number.isFinite(n)) return null;
+      return n;
+    }
+
+    function formatMoney(n) {
+      try { return Number(n).toLocaleString("ko-KR"); }
+      catch { return String(n); }
     }
 
     function setStatus(text, tone) {
