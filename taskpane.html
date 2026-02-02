@@ -1,71 +1,106 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8" />
-    <title>구글 시트 뷰어</title>
-    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; background-color: #ffffff; }
-        .header { color: #2b579a; font-size: 16px; font-weight: bold; margin-bottom: 12px; display: flex; align-items: center; border-bottom: 2px solid #2b579a; padding-bottom: 5px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
-        th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
-        td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
-        tr:nth-child(even) { background-color: #fafafa; }
-        tr:hover { background-color: #f0f7ff; }
-        .loading { color: #666; font-size: 13px; font-style: italic; }
-    </style>
+  <meta charset="UTF-8" />
+  <title>구글 시트 뷰어</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; background-color: #ffffff; }
+    .header { color: #2b579a; font-size: 16px; font-weight: bold; margin-bottom: 12px; display: flex; align-items: center; border-bottom: 2px solid #2b579a; padding-bottom: 5px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
+    th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
+    td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
+    tr:nth-child(even) { background-color: #fafafa; }
+    tr:hover { background-color: #f0f7ff; }
+    .loading { color: #666; font-size: 13px; font-style: italic; }
+    .error { color: #b00020; font-size: 12px; white-space: pre-wrap; line-height: 1.4; }
+  </style>
 </head>
 <body>
-    <div class="header">📊 실시간 시트 데이터</div>
-    <div id="table-container" class="loading">데이터를 불러오는 중...</div>
+  <div class="header">📊 실시간 시트 데이터</div>
+  <div id="table-container" class="loading">데이터를 불러오는 중...</div>
 
-    <script>
-        // 사용자님이 주신 주소에서 추출한 ID입니다.
-        const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
-        // 구글 시트 데이터를 JSON으로 가져오는 마법의 주소
-        const DATA_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
+  <script>
+    const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
+    const DATA_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
 
-        Office.onReady(() => {
-            loadSheetData();
+    Office.onReady(() => {
+      loadSheetData();
+    });
+
+    async function loadSheetData() {
+      const container = document.getElementById('table-container');
+
+      try {
+        const res = await fetch(DATA_URL, {
+          method: "GET",
+          // Outlook 환경에서 리다이렉트가 개입하는 경우를 대비
+          redirect: "follow",
+          cache: "no-store"
         });
 
-        async function loadSheetData() {
-            try {
-                const res = await fetch(DATA_URL);
-                const text = await res.text();
-                
-                // 구글 JSON의 불필요한 앞뒤 텍스트 제거
-                const jsonText = text.substring(47).slice(0, -2);
-                const json = JSON.parse(jsonText);
-                
-                let tableHtml = '<table><thead><tr>';
-                
-                // 1. 헤더(제목줄) 만들기
-                json.table.cols.forEach(col => {
-                    tableHtml += `<th>${col.label || ''}</th>`;
-                });
-                tableHtml += '</tr></thead><tbody>';
-
-                // 2. 데이터 줄 만들기
-                json.table.rows.forEach(row => {
-                    tableHtml += '<tr>';
-                    row.c.forEach(cell => {
-                        // 셀 값이 비어있을 경우 처리
-                        const value = cell ? (cell.f ? cell.f : cell.v) : '';
-                        tableHtml += `<td>${value}</td>`;
-                    });
-                    tableHtml += '</tr>';
-                });
-                
-                tableHtml += '</tbody></table>';
-                document.getElementById('table-container').classList.remove('loading');
-                document.getElementById('table-container').innerHTML = tableHtml;
-            } catch (err) {
-                console.error(err);
-                document.getElementById('table-container').innerHTML = 
-                    "데이터 로드 실패. 시트의 [파일 > 공유 > 웹에 게시]가 되어있는지 다시 확인해주세요.";
-            }
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} ${res.statusText}`);
         }
-    </script>
+
+        const text = await res.text();
+
+        // gviz 응답이 아닌 경우(로그인 페이지/차단/에러 HTML)도 잡아내기
+        if (!text || text.length < 60) {
+          throw new Error("응답이 너무 짧습니다. (차단 또는 빈 응답)");
+        }
+        if (!text.startsWith("/*O_o*/") && text.indexOf("google.visualization") === -1) {
+          // 가끔 HTML이 떨어지는 경우가 있어 디버그를 위해 앞부분을 노출
+          throw new Error("예상한 gviz 응답 형식이 아닙니다.\n응답 앞부분:\n" + text.slice(0, 200));
+        }
+
+        // 구글 JSON의 불필요한 앞뒤 텍스트 제거
+        const jsonText = text.substring(47).slice(0, -2);
+        const json = JSON.parse(jsonText);
+
+        let tableHtml = '<table><thead><tr>';
+
+        json.table.cols.forEach(col => {
+          tableHtml += `<th>${escapeHtml(col.label || '')}</th>`;
+        });
+        tableHtml += '</tr></thead><tbody>';
+
+        json.table.rows.forEach(row => {
+          tableHtml += '<tr>';
+          row.c.forEach(cell => {
+            const value = cell ? (cell.f ? cell.f : cell.v) : '';
+            tableHtml += `<td>${escapeHtml(String(value ?? ''))}</td>`;
+          });
+          tableHtml += '</tr>';
+        });
+
+        tableHtml += '</tbody></table>';
+
+        container.classList.remove('loading');
+        container.innerHTML = tableHtml;
+
+      } catch (err) {
+        console.error(err);
+        container.classList.remove('loading');
+        container.classList.add('error');
+        container.innerHTML =
+          "데이터 로드 실패.\n\n" +
+          "에러 메시지:\n" + (err && err.message ? err.message : String(err)) + "\n\n" +
+          "힌트:\n" +
+          "- Outlook Add-in은 외부 도메인 요청이 제한될 수 있어요.\n" +
+          "- manifest의 AppDomains에 docs.google.com 뿐 아니라 docs.googleusercontent.com도 필요할 수 있어요.\n" +
+          "- 시트가 [파일 > 공유 > 웹에 게시] 되어 있는지도 확인해주세요.";
+      }
+    }
+
+    function escapeHtml(s) {
+      return s
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+  </script>
 </body>
 </html>
