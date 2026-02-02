@@ -6,19 +6,81 @@
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <style>
     body { font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; background: #fff; }
-    .header { color: #2b579a; font-size: 16px; font-weight: 700; border-bottom: 2px solid #2b579a; padding-bottom: 6px; margin-bottom: 12px; }
-    .box { border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
-    .row { margin: 6px 0; font-size: 13px; }
-    .label { color:#666; display:inline-block; width: 120px; }
-    .value { font-weight: 700; }
+    .header { color: #2b579a; font-size: 16px; font-weight: 800; border-bottom: 2px solid #2b579a; padding-bottom: 6px; margin-bottom: 12px; }
+
+    .box { border: 1px solid #e5e5e5; border-radius: 12px; padding: 12px; margin-bottom: 12px; background: #fff; }
+    .row { margin: 6px 0; font-size: 13px; display:flex; gap:10px; align-items: baseline; }
+    .label { color:#666; width: 120px; flex: 0 0 120px; }
+    .value { font-weight: 800; word-break: break-all; }
     .ok { color: #0a7a0a; }
     .warn { color: #b36b00; }
     .err { color: #b00020; white-space: pre-wrap; font-size: 12px; line-height: 1.4; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
-    th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
-    td { padding: 8px; border: 1px solid #e0e0e0; color: #555; vertical-align: top; }
-    button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
+
+    button { padding: 8px 10px; border-radius: 10px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; font-weight: 700; }
+    button:hover { background:#f3f3f3; }
+
     .muted { color:#777; font-size:12px; white-space:pre-wrap; margin-top:8px; }
+
+    /* ✅ 카드 UI */
+    .matchCard {
+      border: 1px solid #e6e6e6;
+      border-radius: 14px;
+      padding: 12px;
+      margin-top: 10px;
+      background: linear-gradient(180deg, #fbfbff 0%, #ffffff 70%);
+      box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+    }
+    .chipRow { display:flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .chip {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #f4f6ff;
+      border: 1px solid #e3e8ff;
+      font-size: 12px;
+      color: #1f3b8a;
+      font-weight: 800;
+    }
+    .chip strong { color:#2b579a; }
+
+    .kvGrid {
+      display:grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .kvItem {
+      border: 1px solid #ededed;
+      border-radius: 12px;
+      padding: 10px;
+      background: #fff;
+    }
+    .kvTitle {
+      font-size: 12px;
+      color: #555;
+      font-weight: 900;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin-bottom: 6px;
+    }
+    .kvValue {
+      font-size: 13px;
+      color: #222;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* 작은 아이콘 느낌 */
+    .dot {
+      width: 8px; height: 8px; border-radius: 999px; display:inline-block;
+      background: #2b579a;
+    }
+    .dot.green { background:#0a7a0a; }
+    .dot.orange { background:#b36b00; }
+    .dot.red { background:#b00020; }
   </style>
 </head>
 <body>
@@ -31,7 +93,8 @@
   </div>
 
   <div class="box">
-    <div class="row"><span class="label">data 매칭</span> <span class="value" id="dataStatus">-</span></div>
+    <!-- ✅ 라벨 변경 -->
+    <div class="row"><span class="label">거래처 매칭</span> <span class="value" id="dataStatus">-</span></div>
     <div id="dataCard"></div>
     <div class="muted" id="debug"></div>
   </div>
@@ -41,76 +104,53 @@
 
   <script>
     const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
+
     const DATA_SHEET_NAME = 'data';
 
+    // A=KEY(이메일/도메인)
     const KEY_COL = 0;
-    const NAME_COL = 1;
-    const AGE_COL = 2;
+
+    // ✅ B/C/D를 새 의미로 사용
+    const FEE_COL = 1;       // 수수료 (예: 3%)
+    const NOTE_COL = 2;      // 특이사항 (긴 텍스트)
+    const BAN_COL = 3;       // 금지사항 (긴 텍스트)
 
     const FIRST_ROW_IS_HEADER = false;
 
-    // ✅ 현재 메일을 식별하기 위한 값(변경 감지/디버그용)
-    let lastItemId = null;
-    let lastFromEmail = null;
-
-    document.getElementById('btnRefresh').addEventListener('click', () => run("manual"));
+    document.getElementById('btnRefresh').addEventListener('click', run);
 
     if (typeof Office === 'undefined') {
       showError("Office.js 컨텍스트가 없습니다. Outlook Add-in 안에서 열어주세요.");
       setStatus("Outlook에서 열어주세요", "warn");
     } else {
       Office.onReady(async () => {
-        // ✅ 메일이 바뀔 때마다 자동 갱신
         try {
-          Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, (args) => {
-            // 일부 클라이언트에서 이벤트 직후 item이 아직 이전 값일 수 있어 딜레이
-            setStatus("메일 변경 감지…", "warn");
-            setTimeout(() => run("itemChanged"), 250);
-
-            // 일부 환경에서는 completed가 있을 수 있음(있으면 호출)
-            try { if (args && typeof args.completed === "function") args.completed(); } catch {}
+          Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => {
+            run();
           });
         } catch (e) {
           console.error("ItemChanged handler failed:", e);
         }
 
-        run("onReady");
+        run();
       });
     }
 
-    async function run(trigger) {
+    async function run() {
       clearError();
       clearUI();
       setStatus("불러오는 중...", "warn");
 
       try {
-        const { fromEmail, fromDomain, itemId, debugInfo } = await getFromInfoAsync();
-
-        // ✅ UI 업데이트
+        const { fromEmail, fromDomain } = getFromInfo();
         document.getElementById('fromEmail').textContent = fromEmail || '(없음)';
         document.getElementById('fromDomain').textContent = fromDomain || '(없음)';
-
-        // ✅ 디버그/변경 감지 정보
-        const changedMarks = [];
-        if (lastItemId !== null && itemId && itemId !== lastItemId) changedMarks.push("itemId changed");
-        if (lastFromEmail !== null && fromEmail && fromEmail !== lastFromEmail) changedMarks.push("fromEmail changed");
-
-        lastItemId = itemId || lastItemId;
-        lastFromEmail = fromEmail || lastFromEmail;
-
-        setDebug(
-          `trigger=${trigger}\n` +
-          `itemId=${itemId || '(none)'}\n` +
-          `changed=${changedMarks.length ? changedMarks.join(", ") : "(no diff / first run)"}\n` +
-          (debugInfo ? `\nfromDebug:\n${debugInfo}\n` : "")
-        );
 
         if (!fromDomain) {
           setStatus("발신자 도메인을 읽지 못했습니다.", "warn");
           return;
         }
 
-        // ✅ 캐시 방지용 timestamp
         const url = buildGvizUrl(SHEET_ID, DATA_SHEET_NAME);
         const rows = await fetchGvizRows(url);
         const dataRows = (FIRST_ROW_IS_HEADER && rows.length) ? rows.slice(1) : rows;
@@ -128,8 +168,6 @@
           }).join("\n");
 
           setDebug(
-            `trigger=${trigger}\n` +
-            `itemId=${itemId || '(none)'}\n` +
             `data 시트 로드됨: rows=${dataRows.length}\n\n` +
             "A열 디버그(상위 30개):\n" + sample
           );
@@ -141,24 +179,38 @@
         setDataStatus(`매칭됨 (#${rowIndex+1})`, "ok");
         setStatus("표시 완료", "ok");
 
-        const name = row[NAME_COL] ?? '';
-        const age = row[AGE_COL] ?? '';
+        const fee = String(row[FEE_COL] ?? '').trim();
+        const note = String(row[NOTE_COL] ?? '').trim();
+        const ban  = String(row[BAN_COL] ?? '').trim();
 
+        // ✅ 카드형 렌더링
         document.getElementById('dataCard').innerHTML = `
-          <table>
-            <thead>
-              <tr><th>KEY(A)</th><th>KEY→도메인</th><th>이름(B)</th><th>나이(C)</th></tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>${escapeHtml(rawKey)}</td>
-                <td>${escapeHtml(normKey)}</td>
-                <td>${escapeHtml(String(name))}</td>
-                <td>${escapeHtml(String(age))}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="matchCard">
+            <div class="chipRow">
+              <span class="chip"><span class="dot"></span><strong>KEY</strong> ${escapeHtml(rawKey || '-')}</span>
+              <span class="chip"><span class="dot green"></span><strong>도메인</strong> ${escapeHtml(normKey || '-')}</span>
+            </div>
+
+            <div class="kvGrid">
+              <div class="kvItem">
+                <div class="kvTitle"><span class="dot green"></span> 수수료</div>
+                <div class="kvValue">${escapeHtml(fee || '-')}${fee ? '' : ''}</div>
+              </div>
+
+              <div class="kvItem">
+                <div class="kvTitle"><span class="dot orange"></span> 특이사항</div>
+                <div class="kvValue">${escapeHtml(note || '-')}</div>
+              </div>
+
+              <div class="kvItem">
+                <div class="kvTitle"><span class="dot red"></span> 금지사항</div>
+                <div class="kvValue">${escapeHtml(ban || '-')}</div>
+              </div>
+            </div>
+          </div>
         `;
+
+        setDebug(`data 시트 로드됨: rows=${dataRows.length}`);
 
       } catch (e) {
         console.error(e);
@@ -167,40 +219,13 @@
       }
     }
 
-    // ✅ from 읽기를 최대한 호환되게 (즉시값/async 둘 다 지원)
-    async function getFromInfoAsync() {
+    function getFromInfo() {
       const item = Office?.context?.mailbox?.item;
       if (!item) throw new Error("Office.context.mailbox.item 이 없습니다. (메일 읽기 화면에서 열어주세요)");
 
-      const itemId = item.itemId || null;
-
-      let fromEmail = '';
-      let debugInfo = '';
-
-      // 1) 가능하면 getAsync 우선(클라이언트/모드별 호환)
-      try {
-        if (item.from && typeof item.from.getAsync === 'function') {
-          const r = await new Promise((resolve, reject) => {
-            item.from.getAsync((asyncResult) => {
-              if (asyncResult.status === Office.AsyncResultStatus.Succeeded) resolve(asyncResult.value);
-              else reject(asyncResult.error || new Error("from.getAsync failed"));
-            });
-          });
-          fromEmail = r?.emailAddress || '';
-          debugInfo += `used: item.from.getAsync\nraw: ${JSON.stringify(r)}\n`;
-        }
-      } catch (e) {
-        debugInfo += `from.getAsync error: ${e?.message || String(e)}\n`;
-      }
-
-      // 2) fallback: 기존 방식
-      if (!fromEmail) {
-        fromEmail = item?.from?.emailAddress || '';
-        debugInfo += `used: item.from.emailAddress fallback\n`;
-      }
-
+      const fromEmail = item?.from?.emailAddress || '';
       const fromDomain = normalizeToDomain(fromEmail);
-      return { fromEmail, fromDomain, itemId, debugInfo };
+      return { fromEmail, fromDomain };
     }
 
     function buildGvizUrl(sheetId, sheetName) {
