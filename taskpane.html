@@ -18,9 +18,8 @@
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
     th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
     td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
-
     button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
-    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #ddd; margin-left:6px; }
+    .muted { color:#777; font-size:12px; white-space:pre-wrap; margin-top:8px; }
   </style>
 </head>
 <body>
@@ -29,48 +28,38 @@
   <div class="box">
     <div class="row"><span class="label">발신자 이메일</span> <span class="value" id="fromEmail">-</span></div>
     <div class="row"><span class="label">발신자 도메인</span> <span class="value" id="fromDomain">-</span></div>
+    <div class="row"><span class="label">정규화 도메인</span> <span class="value" id="normDomain">-</span></div>
     <div class="row"><span class="label">상태</span> <span class="value" id="statusText">대기중</span></div>
   </div>
 
   <div class="box">
-    <div class="row">
-      <span class="label">domain 시트</span>
-      <span class="value" id="domainStatus">-</span>
-    </div>
+    <div class="row"><span class="label">domain 시트</span> <span class="value" id="domainStatus">-</span></div>
   </div>
 
   <div class="box">
-    <div class="row">
-      <span class="label">data 시트</span>
-      <span class="value" id="dataStatus">-</span>
-    </div>
+    <div class="row"><span class="label">data 시트</span> <span class="value" id="dataStatus">-</span></div>
     <div id="dataTable"></div>
+    <div class="muted" id="debug"></div>
   </div>
 
   <button id="btnRefresh">새로고침</button>
   <div class="err" id="error" style="margin-top:10px;"></div>
 
   <script>
-    // ✅ 네 구글 시트 ID
     const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
-
-    // ✅ 시트 탭 이름들 (너가 말한대로)
     const DOMAIN_SHEET_NAME = 'domain';
     const DATA_SHEET_NAME = 'data';
 
-    // gviz URL
     const DOMAIN_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(DOMAIN_SHEET_NAME)}`;
     const DATA_URL   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(DATA_SHEET_NAME)}`;
 
-    // ✅ domain 시트에서 도메인이 들어있는 컬럼 인덱스(0부터)
-    // 예: [거래처명, 도메인] 이면 도메인=1
+    // domain 시트: [거래처명, 도메인] -> 도메인=1
     const DOMAIN_COL_INDEX_IN_DOMAIN_SHEET = 1;
 
-    // ✅ data 시트에서 도메인이 들어있는 컬럼 인덱스(0부터)
-    // 예: [도메인, 이름, 직급] 이면 도메인=0
+    // data 시트: A열=도메인 -> 도메인=0
     const DOMAIN_COL_INDEX_IN_DATA_SHEET = 0;
 
-    // domain/data 시트의 첫 행이 헤더(제목줄)면 true
+    // 첫 행이 헤더면 true
     const FIRST_ROW_IS_HEADER = true;
 
     document.getElementById('btnRefresh').addEventListener('click', run);
@@ -105,18 +94,22 @@
       setStatus("불러오는 중...", "warn");
       setDomainStatus("-");
       setDataStatus("-");
+      setDebug("");
 
       try {
-        const { fromEmail, fromDomain } = getFromInfo();
+        const { fromEmail, fromDomainRaw } = getFromInfo();
+        const fromDomain = normalizeDomain(fromDomainRaw);
+
         document.getElementById('fromEmail').textContent = fromEmail || '(없음)';
-        document.getElementById('fromDomain').textContent = fromDomain || '(없음)';
+        document.getElementById('fromDomain').textContent = fromDomainRaw || '(없음)';
+        document.getElementById('normDomain').textContent = fromDomain || '(없음)';
 
         if (!fromDomain) {
           setStatus("발신자 도메인을 읽지 못했습니다.", "warn");
           return;
         }
 
-        // 1) domain 시트에서 “이 도메인이 등록되어 있는지” 확인
+        // 1) domain 시트에서 등록 여부 확인
         const domainTable = await fetchGvizTable(DOMAIN_URL);
         let domainRows = domainTable.rows;
         if (FIRST_ROW_IS_HEADER && domainRows.length) domainRows = domainRows.slice(1);
@@ -131,22 +124,29 @@
 
         setDomainStatus(`등록됨 (${fromDomain})`, "ok");
 
-        // 2) data 시트에서 “도메인 매칭된 행 1개”만 찾아서 표시
+        // 2) data 시트에서 매칭 행 찾기
         const dataTable = await fetchGvizTable(DATA_URL);
         let dataRows = dataTable.rows;
         if (FIRST_ROW_IS_HEADER && dataRows.length) dataRows = dataRows.slice(1);
+
+        // 디버그: data 시트 A열 도메인 상위 10개 정규화해서 보여주기
+        const sample = dataRows.slice(0, 10).map(r => {
+          const raw = String(r[DOMAIN_COL_INDEX_IN_DATA_SHEET] ?? '');
+          const norm = normalizeDomain(raw);
+          return `- raw: "${raw}"  -> norm: "${norm}"`;
+        }).join("\n");
+        setDebug("data 시트 도메인 샘플(상위 10개):\n" + sample);
 
         const matchedDataRow = findRowByDomain(dataRows, fromDomain, DOMAIN_COL_INDEX_IN_DATA_SHEET);
 
         if (!matchedDataRow) {
           setDataStatus(`매칭 없음 (${fromDomain})`, "warn");
-          setStatus("domain에는 있지만 data에는 해당 도메인이 없습니다.", "warn");
+          setStatus("domain에는 있지만 data에는 해당 도메인이 없거나 형식이 다릅니다.", "warn");
           return;
         }
 
         setDataStatus(`매칭됨 (${fromDomain})`, "ok");
         renderSingleRowTable(dataTable.headers, matchedDataRow);
-
         setStatus("표시 완료", "ok");
 
       } catch (e) {
@@ -161,15 +161,45 @@
       if (!item) throw new Error("Office.context.mailbox.item 이 없습니다.");
 
       const fromEmail = item?.from?.emailAddress || '';
-      const fromDomain = extractDomain(fromEmail);
-      return { fromEmail, fromDomain };
+      const fromDomainRaw = extractDomain(fromEmail);
+      return { fromEmail, fromDomainRaw };
     }
 
     function extractDomain(email) {
       if (!email) return '';
       const at = email.lastIndexOf('@');
       if (at === -1) return '';
-      return email.slice(at + 1).trim().toLowerCase();
+      return email.slice(at + 1).trim();
+    }
+
+    // ✅ 매칭 핵심: 도메인 문자열 정규화
+    function normalizeDomain(value) {
+      if (value == null) return '';
+      let s = String(value);
+
+      // 특수공백/줄바꿈 포함한 공백 제거
+      s = s.replace(/\u00A0/g, ' ');     // nbsp
+      s = s.trim().toLowerCase();
+
+      // 값이 "user@test.com"처럼 이메일이면 도메인만 뽑기
+      if (s.includes('@')) {
+        const at = s.lastIndexOf('@');
+        s = s.slice(at + 1).trim();
+      }
+
+      // "test.com/" 같은 경우 슬래시 이후 제거
+      s = s.replace(/\/.*$/, '');
+
+      // "test.com, ..." 같은 경우 콤마 이후 제거
+      s = s.replace(/,.*$/, '');
+
+      // 프로토콜이 섞이면 제거
+      s = s.replace(/^https?:\/\//, '');
+
+      // 앞에 점/골뱅이 같은 것 제거
+      s = s.replace(/^[.@]+/, '');
+
+      return s;
     }
 
     async function fetchGvizTable(url) {
@@ -181,7 +211,6 @@
       const json = JSON.parse(jsonText);
 
       const headers = (json.table.cols || []).map((c, idx) => ({ label: c.label || `COL${idx + 1}` }));
-
       const rows = (json.table.rows || []).map(r => (r.c || []).map(cell => {
         if (!cell) return '';
         return (cell.f != null ? cell.f : cell.v) ?? '';
@@ -190,16 +219,19 @@
       return { headers, rows };
     }
 
-    function findRowByDomain(rows, domain, domainColIndex) {
-      const d = domain.toLowerCase();
+    function findRowByDomain(rows, domainNormalized, domainColIndex) {
+      const d = normalizeDomain(domainNormalized);
       for (const row of rows) {
-        const cell = String(row[domainColIndex] ?? '').trim().toLowerCase();
+        const cellRaw = row[domainColIndex];
+        const cell = normalizeDomain(cellRaw);
         if (!cell) continue;
 
+        // 정확 일치
         if (cell === d) return row;
 
-        // 서브도메인 허용하고 싶으면 아래 주석 해제
-        // if (d === cell || d.endsWith('.' + cell)) return row;
+        // 서브도메인 허용(예: mail.test.com -> test.com)
+        if (cell && d.endsWith('.' + cell)) return row;
+        if (d && cell.endsWith('.' + d)) return row; // 반대 케이스도 안전하게
       }
       return null;
     }
@@ -241,6 +273,10 @@
       if (tone) el.classList.add(tone);
     }
 
+    function setDebug(text) {
+      document.getElementById('debug').textContent = text || '';
+    }
+
     function showError(msg) {
       document.getElementById('error').textContent = msg;
     }
@@ -250,7 +286,7 @@
     }
 
     function escapeHtml(s) {
-      return s
+      return String(s)
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
