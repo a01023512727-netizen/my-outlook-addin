@@ -16,9 +16,9 @@
     .err { color: #b00020; white-space: pre-wrap; font-size: 12px; line-height: 1.4; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
     th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
-    td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
-    .muted { color:#777; font-size:12px; white-space:pre-wrap; margin-top:8px; }
+    td { padding: 8px; border: 1px solid #e0e0e0; color: #555; vertical-align: top; }
     button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
+    .muted { color:#777; font-size:12px; white-space:pre-wrap; margin-top:8px; }
   </style>
 </head>
 <body>
@@ -41,15 +41,15 @@
 
   <script>
     const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
-    const DATA_SHEET_NAME = 'data';
-    const DATA_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(DATA_SHEET_NAME)}`;
 
-    // 너 구조: A=키(이메일/도메인), B=이름, C=나이
+    // ✅ data 시트 탭 이름
+    const DATA_SHEET_NAME = 'data';
+
+    // 너 구조: A=이메일/도메인, B=이름, C=나이 (필요하면 확장)
     const KEY_COL = 0;
     const NAME_COL = 1;
     const AGE_COL = 2;
 
-    // data 시트에 헤더(제목줄) 없다고 했으니 false 추천
     const FIRST_ROW_IS_HEADER = false;
 
     document.getElementById('btnRefresh').addEventListener('click', run);
@@ -58,7 +58,17 @@
       showError("Office.js 컨텍스트가 없습니다. Outlook Add-in 안에서 열어주세요.");
       setStatus("Outlook에서 열어주세요", "warn");
     } else {
-      Office.onReady(() => {
+      Office.onReady(async () => {
+        // ✅ 메일이 바뀔 때마다 자동 갱신
+        try {
+          Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => {
+            run(); // 메일 전환 시 자동 새로고침
+          });
+        } catch (e) {
+          // 일부 환경에서 실패할 수 있어도 수동 새로고침은 됨
+          console.error("ItemChanged handler failed:", e);
+        }
+
         run();
       });
     }
@@ -78,34 +88,43 @@
           return;
         }
 
-        const table = await fetchGvizTable(DATA_URL);
-        let rows = table.rows;
-        if (FIRST_ROW_IS_HEADER && rows.length) rows = rows.slice(1);
+        // ✅ 캐시 방지용 timestamp 붙이기
+        const url = buildGvizUrl(SHEET_ID, DATA_SHEET_NAME);
 
-        // 핵심: data A열 raw 값 -> 도메인으로 변환해서 fromDomain과 비교
-        const match = findFirstMatchByDomainInA(rows, fromDomain);
+        const rows = await fetchGvizRows(url);
+
+        // 헤더가 있으면 제거
+        const dataRows = (FIRST_ROW_IS_HEADER && rows.length) ? rows.slice(1) : rows;
+
+        // A열(키)을 도메인으로 변환해서 매칭
+        const match = findFirstMatchByDomainInA(dataRows, fromDomain);
 
         if (!match) {
           setDataStatus(`매칭 없음 (${fromDomain})`, "warn");
           setStatus("data 시트 A열에서 도메인 매칭 실패", "warn");
 
           // 디버그: 상위 30개 raw/norm 출력
-          const sample = rows.slice(0, 30).map((r, idx) => {
+          const sample = dataRows.slice(0, 30).map((r, idx) => {
             const raw = String(r[KEY_COL] ?? '');
             const norm = normalizeToDomain(raw);
             return `${idx+1}. raw="${raw}" -> domain="${norm}"`;
           }).join("\n");
-          setDebug("data 시트 A열 디버그(상위 30개):\n" + sample);
 
+          setDebug(
+            `data 시트 로드됨: rows=${dataRows.length}\n\n` +
+            "A열 디버그(상위 30개):\n" + sample
+          );
           return;
         }
 
         const { rowIndex, row, rawKey, normKey } = match;
+
         setDataStatus(`매칭됨 (#${rowIndex+1})`, "ok");
         setStatus("표시 완료", "ok");
 
         const name = row[NAME_COL] ?? '';
         const age = row[AGE_COL] ?? '';
+
         document.getElementById('dataCard').innerHTML = `
           <table>
             <thead>
@@ -122,6 +141,8 @@
           </table>
         `;
 
+        setDebug(`data 시트 로드됨: rows=${dataRows.length}`);
+
       } catch (e) {
         console.error(e);
         showError((e && e.message) ? e.message : String(e));
@@ -134,8 +155,48 @@
       if (!item) throw new Error("Office.context.mailbox.item 이 없습니다. (메일 읽기 화면에서 열어주세요)");
 
       const fromEmail = item?.from?.emailAddress || '';
-      const fromDomain = normalizeToDomain(fromEmail); // 이메일→도메인
+      const fromDomain = normalizeToDomain(fromEmail);
       return { fromEmail, fromDomain };
+    }
+
+    function buildGvizUrl(sheetId, sheetName) {
+      const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+      // cache buster
+      return `${base}&_ts=${Date.now()}`;
+    }
+
+    async function fetchGvizRows(url) {
+      const res = await fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store' });
+
+      if (!res.ok) {
+        const body = await safeText(res);
+        throw new Error(`Sheet fetch failed: HTTP ${res.status} ${res.statusText}\n\n응답 일부:\n${(body || '').slice(0, 300)}`);
+      }
+
+      const text = await res.text();
+
+      // gviz 형식이 아니면 (로그인/권한/차단 HTML일 가능성)
+      if (!text.includes("google.visualization") && !text.startsWith("/*O_o*/")) {
+        throw new Error(
+          "gviz JSON 형식이 아닙니다. (로그인/권한/차단 가능)\n\n응답 일부:\n" +
+          text.slice(0, 300)
+        );
+      }
+
+      // gviz JSON 부분만 잘라내기
+      const jsonText = text.substring(47).slice(0, -2);
+      const json = JSON.parse(jsonText);
+
+      const rows = (json.table.rows || []).map(r => (r.c || []).map(cell => {
+        if (!cell) return '';
+        return (cell.f != null ? cell.f : cell.v) ?? '';
+      }));
+
+      return rows;
+    }
+
+    async function safeText(res) {
+      try { return await res.text(); } catch { return ""; }
     }
 
     function normalizeToDomain(value) {
@@ -165,34 +226,17 @@
 
         if (!keyDomain) continue;
 
-        // exact
         if (keyDomain === d) {
           return { rowIndex: i, row: rows[i], rawKey, normKey: keyDomain };
         }
 
-        // subdomain tolerant (mail.tidesquare.com vs tidesquare.com)
+        // 서브도메인 허용
         if (d.endsWith('.' + keyDomain) || keyDomain.endsWith('.' + d)) {
           return { rowIndex: i, row: rows[i], rawKey, normKey: keyDomain };
         }
       }
 
       return null;
-    }
-
-    async function fetchGvizTable(url) {
-      const res = await fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store' });
-      if (!res.ok) throw new Error(`Sheet fetch failed: HTTP ${res.status} ${res.statusText}`);
-
-      const text = await res.text();
-      const jsonText = text.substring(47).slice(0, -2);
-      const json = JSON.parse(jsonText);
-
-      const rows = (json.table.rows || []).map(r => (r.c || []).map(cell => {
-        if (!cell) return '';
-        return (cell.f != null ? cell.f : cell.v) ?? '';
-      }));
-
-      return { rows };
     }
 
     function setStatus(text, tone) {
