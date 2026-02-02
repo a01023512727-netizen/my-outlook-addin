@@ -40,28 +40,19 @@
   <div class="err" id="error" style="margin-top:10px;"></div>
 
   <script>
-    // ✅ 여기만 너의 Apps Script 웹앱 URL로 교체
-    const SCRIPT_API_URL = "https://script.google.com/a/macros/tidesquare.com/s/AKfycbxKhumHlF_yYFyTxYuuYKCJRfE3LPVks0LpSrA6GQPKwZGDPz3WMWm5MugPZ80wbBQA/exec";
+    // ✅ Apps Script 웹앱 URL로 변경
+    const SCRIPT_API_URL = "https://script.google.com/a/macros/tidesquare.com/s/AKfycbyxmuEk8REKFl-eRSe4MYs_nxHkW20ll58EdRpRc8pk8TALr9l-J0lwjUGteVLzdyU/exec";
 
     document.getElementById('btnRefresh').addEventListener('click', run);
 
-    if (typeof Office === 'undefined') {
-      showError("Office.js 컨텍스트가 없습니다. Outlook Add-in 안에서 열어주세요.");
-      setStatus("Outlook에서 열어주세요", "warn");
-    } else {
-      Office.onReady(() => {
-        // ✅ 메일이 바뀌면 자동 갱신
-        try {
-          Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => {
-            run();
-          });
-        } catch (e) {
-          console.error("ItemChanged handler failed:", e);
-        }
-
-        run();
-      });
-    }
+    Office.onReady(() => {
+      try {
+        Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => run());
+      } catch (e) {
+        console.error("ItemChanged handler failed:", e);
+      }
+      run();
+    });
 
     async function run() {
       clearError();
@@ -80,20 +71,10 @@
           return;
         }
 
-        const url = `${SCRIPT_API_URL}?domain=${encodeURIComponent(fromDomain)}&_ts=${Date.now()}`;
+        // ✅ JSONP 호출 (CORS 우회)
+        const json = await callScriptJsonp(fromDomain);
 
-        const res = await fetch(url, { method: "GET", redirect: "follow", cache: "no-store" });
-        const text = await res.text();
-
-        let json;
-        try {
-          json = JSON.parse(text);
-        } catch {
-          throw new Error("Apps Script 응답이 JSON이 아닙니다.\n\n응답 일부:\n" + text.slice(0, 400));
-        }
-
-        // 디버그로 원문도 보여주기
-        setDebug("API URL:\n" + url + "\n\n응답:\n" + JSON.stringify(json, null, 2));
+        setDebug("응답:\n" + JSON.stringify(json, null, 2));
 
         if (!json.allowed) {
           setResultStatus("권한/등록 없음", "warn");
@@ -101,16 +82,14 @@
           return;
         }
 
-        if (json.allowed && json.matched === false) {
+        if (json.matched === false) {
           setResultStatus("등록됨 / data 매칭 없음", "warn");
           setStatus("domain에는 있지만 data에는 매칭이 없습니다.", "warn");
           return;
         }
 
-        // 기대 응답: {"allowed":true,"domain":"tidesquare.com","name":"타이드스퀘어","age":0.03,"row":2}
         setResultStatus("매칭됨 ✅", "ok");
         setStatus("표시 완료", "ok");
-
         renderResult(json);
 
       } catch (e) {
@@ -129,19 +108,53 @@
       return { fromEmail, fromDomain };
     }
 
-    // 이메일/도메인 입력을 "도메인"으로 정규화
     function normalizeToDomain(value) {
       if (value == null) return '';
       let s = String(value);
-
       s = s.replace(/\u00A0/g, ' ').trim().toLowerCase();
       s = s.replace(/^https?:\/\//, '');
       s = s.replace(/,.*$/, '');
       s = s.replace(/\/.*$/, '');
       s = s.replace(/^[.@]+/, '');
-
       if (s.includes('@')) s = s.slice(s.lastIndexOf('@') + 1).trim();
       return s;
+    }
+
+    // ✅ JSONP: <script src="...&callback=cb_xxx"> 로드 후 cb 호출
+    function callScriptJsonp(domain) {
+      return new Promise((resolve, reject) => {
+        const cbName = "cb_" + Math.random().toString(36).slice(2);
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error("Apps Script JSONP timeout"));
+        }, 12000);
+
+        window[cbName] = (data) => {
+          cleanup();
+          resolve(data);
+        };
+
+        const url =
+          `${SCRIPT_API_URL}?domain=${encodeURIComponent(domain)}` +
+          `&callback=${encodeURIComponent(cbName)}` +
+          `&_ts=${Date.now()}`;
+
+        const script = document.createElement("script");
+        script.src = url;
+        script.async = true;
+        script.onerror = () => {
+          cleanup();
+          reject(new Error("Apps Script JSONP load failed"));
+        };
+
+        document.head.appendChild(script);
+
+        function cleanup() {
+          clearTimeout(timeout);
+          try { delete window[cbName]; } catch {}
+          if (script && script.parentNode) script.parentNode.removeChild(script);
+        }
+      });
     }
 
     function renderResult(json) {
@@ -152,7 +165,7 @@
         ["row", String(json.row ?? "")]
       ];
 
-      const html = `
+      document.getElementById('resultTable').innerHTML = `
         <table>
           <thead><tr><th>항목</th><th>값</th></tr></thead>
           <tbody>
@@ -160,7 +173,6 @@
           </tbody>
         </table>
       `;
-      document.getElementById('resultTable').innerHTML = html;
     }
 
     function setStatus(text, tone) {
