@@ -41,18 +41,19 @@
 
   <script>
     const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
-
-    // ✅ data 시트 탭 이름
     const DATA_SHEET_NAME = 'data';
 
-    // 너 구조: A=이메일/도메인, B=이름, C=나이 (필요하면 확장)
     const KEY_COL = 0;
     const NAME_COL = 1;
     const AGE_COL = 2;
 
     const FIRST_ROW_IS_HEADER = false;
 
-    document.getElementById('btnRefresh').addEventListener('click', run);
+    // ✅ 현재 메일을 식별하기 위한 값(변경 감지/디버그용)
+    let lastItemId = null;
+    let lastFromEmail = null;
+
+    document.getElementById('btnRefresh').addEventListener('click', () => run("manual"));
 
     if (typeof Office === 'undefined') {
       showError("Office.js 컨텍스트가 없습니다. Outlook Add-in 안에서 열어주세요.");
@@ -61,49 +62,65 @@
       Office.onReady(async () => {
         // ✅ 메일이 바뀔 때마다 자동 갱신
         try {
-          Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => {
-            run(); // 메일 전환 시 자동 새로고침
+          Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, (args) => {
+            // 일부 클라이언트에서 이벤트 직후 item이 아직 이전 값일 수 있어 딜레이
+            setStatus("메일 변경 감지…", "warn");
+            setTimeout(() => run("itemChanged"), 250);
+
+            // 일부 환경에서는 completed가 있을 수 있음(있으면 호출)
+            try { if (args && typeof args.completed === "function") args.completed(); } catch {}
           });
         } catch (e) {
-          // 일부 환경에서 실패할 수 있어도 수동 새로고침은 됨
           console.error("ItemChanged handler failed:", e);
         }
 
-        run();
+        run("onReady");
       });
     }
 
-    async function run() {
+    async function run(trigger) {
       clearError();
       clearUI();
       setStatus("불러오는 중...", "warn");
 
       try {
-        const { fromEmail, fromDomain } = getFromInfo();
+        const { fromEmail, fromDomain, itemId, debugInfo } = await getFromInfoAsync();
+
+        // ✅ UI 업데이트
         document.getElementById('fromEmail').textContent = fromEmail || '(없음)';
         document.getElementById('fromDomain').textContent = fromDomain || '(없음)';
+
+        // ✅ 디버그/변경 감지 정보
+        const changedMarks = [];
+        if (lastItemId !== null && itemId && itemId !== lastItemId) changedMarks.push("itemId changed");
+        if (lastFromEmail !== null && fromEmail && fromEmail !== lastFromEmail) changedMarks.push("fromEmail changed");
+
+        lastItemId = itemId || lastItemId;
+        lastFromEmail = fromEmail || lastFromEmail;
+
+        setDebug(
+          `trigger=${trigger}\n` +
+          `itemId=${itemId || '(none)'}\n` +
+          `changed=${changedMarks.length ? changedMarks.join(", ") : "(no diff / first run)"}\n` +
+          (debugInfo ? `\nfromDebug:\n${debugInfo}\n` : "")
+        );
 
         if (!fromDomain) {
           setStatus("발신자 도메인을 읽지 못했습니다.", "warn");
           return;
         }
 
-        // ✅ 캐시 방지용 timestamp 붙이기
+        // ✅ 캐시 방지용 timestamp
         const url = buildGvizUrl(SHEET_ID, DATA_SHEET_NAME);
-
         const rows = await fetchGvizRows(url);
-
-        // 헤더가 있으면 제거
         const dataRows = (FIRST_ROW_IS_HEADER && rows.length) ? rows.slice(1) : rows;
 
-        // A열(키)을 도메인으로 변환해서 매칭
         const match = findFirstMatchByDomainInA(dataRows, fromDomain);
 
         if (!match) {
           setDataStatus(`매칭 없음 (${fromDomain})`, "warn");
           setStatus("data 시트 A열에서 도메인 매칭 실패", "warn");
 
-          // 디버그: 상위 30개 raw/norm 출력
           const sample = dataRows.slice(0, 30).map((r, idx) => {
             const raw = String(r[KEY_COL] ?? '');
             const norm = normalizeToDomain(raw);
@@ -111,6 +128,8 @@
           }).join("\n");
 
           setDebug(
+            `trigger=${trigger}\n` +
+            `itemId=${itemId || '(none)'}\n` +
             `data 시트 로드됨: rows=${dataRows.length}\n\n` +
             "A열 디버그(상위 30개):\n" + sample
           );
@@ -141,8 +160,6 @@
           </table>
         `;
 
-        setDebug(`data 시트 로드됨: rows=${dataRows.length}`);
-
       } catch (e) {
         console.error(e);
         showError((e && e.message) ? e.message : String(e));
@@ -150,18 +167,44 @@
       }
     }
 
-    function getFromInfo() {
+    // ✅ from 읽기를 최대한 호환되게 (즉시값/async 둘 다 지원)
+    async function getFromInfoAsync() {
       const item = Office?.context?.mailbox?.item;
       if (!item) throw new Error("Office.context.mailbox.item 이 없습니다. (메일 읽기 화면에서 열어주세요)");
 
-      const fromEmail = item?.from?.emailAddress || '';
+      const itemId = item.itemId || null;
+
+      let fromEmail = '';
+      let debugInfo = '';
+
+      // 1) 가능하면 getAsync 우선(클라이언트/모드별 호환)
+      try {
+        if (item.from && typeof item.from.getAsync === 'function') {
+          const r = await new Promise((resolve, reject) => {
+            item.from.getAsync((asyncResult) => {
+              if (asyncResult.status === Office.AsyncResultStatus.Succeeded) resolve(asyncResult.value);
+              else reject(asyncResult.error || new Error("from.getAsync failed"));
+            });
+          });
+          fromEmail = r?.emailAddress || '';
+          debugInfo += `used: item.from.getAsync\nraw: ${JSON.stringify(r)}\n`;
+        }
+      } catch (e) {
+        debugInfo += `from.getAsync error: ${e?.message || String(e)}\n`;
+      }
+
+      // 2) fallback: 기존 방식
+      if (!fromEmail) {
+        fromEmail = item?.from?.emailAddress || '';
+        debugInfo += `used: item.from.emailAddress fallback\n`;
+      }
+
       const fromDomain = normalizeToDomain(fromEmail);
-      return { fromEmail, fromDomain };
+      return { fromEmail, fromDomain, itemId, debugInfo };
     }
 
     function buildGvizUrl(sheetId, sheetName) {
       const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-      // cache buster
       return `${base}&_ts=${Date.now()}`;
     }
 
@@ -175,7 +218,6 @@
 
       const text = await res.text();
 
-      // gviz 형식이 아니면 (로그인/권한/차단 HTML일 가능성)
       if (!text.includes("google.visualization") && !text.startsWith("/*O_o*/")) {
         throw new Error(
           "gviz JSON 형식이 아닙니다. (로그인/권한/차단 가능)\n\n응답 일부:\n" +
@@ -183,7 +225,6 @@
         );
       }
 
-      // gviz JSON 부분만 잘라내기
       const jsonText = text.substring(47).slice(0, -2);
       const json = JSON.parse(jsonText);
 
@@ -203,13 +244,12 @@
       if (value == null) return '';
       let s = String(value);
 
-      s = s.replace(/\u00A0/g, ' ').trim().toLowerCase(); // nbsp 제거
+      s = s.replace(/\u00A0/g, ' ').trim().toLowerCase();
       s = s.replace(/^https?:\/\//, '');
       s = s.replace(/,.*$/, '');
       s = s.replace(/\/.*$/, '');
       s = s.replace(/^[.@]+/, '');
 
-      // 이메일이면 @ 뒤만
       if (s.includes('@')) {
         s = s.slice(s.lastIndexOf('@') + 1).trim();
       }
@@ -230,7 +270,6 @@
           return { rowIndex: i, row: rows[i], rawKey, normKey: keyDomain };
         }
 
-        // 서브도메인 허용
         if (d.endsWith('.' + keyDomain) || keyDomain.endsWith('.' + d)) {
           return { rowIndex: i, row: rows[i], rawKey, normKey: keyDomain };
         }
