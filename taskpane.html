@@ -39,41 +39,57 @@
     .dot.green { background:#0a7a0a; }
     .dot.orange { background:#b36b00; }
     .dot.red { background:#b00020; }
+    .dot.gray { background:#666; }
 
-    /* 수수료 계산 UI */
-    .feeRow { display:flex; gap:10px; align-items:center; flex-wrap: wrap; margin-top: 8px; }
+    /* 수수료 라인: 간격 줄이기 */
+    .feeLine {
+      display:flex;
+      align-items:center;
+      gap: 8px;              /* ✅ 간격 좁게 */
+      flex-wrap: wrap;
+      margin-top: 4px;       /* ✅ 위 여백 줄이기 */
+    }
     .feePill {
       display:inline-flex; align-items:center; gap:6px;
       border: 1px solid #e3e8ff;
       background:#f4f6ff;
       color:#1f3b8a;
       border-radius: 999px;
-      padding: 6px 10px;
+      padding: 4px 8px;      /* ✅ 패딩 줄이기 */
       font-size: 12px;
       font-weight: 900;
+      line-height: 1.2;
     }
     .feeInput {
-      flex: 1 1 160px;
-      min-width: 160px;
+      width: 140px;          /* ✅ 너무 길지 않게 */
       border: 1px solid #ddd;
       border-radius: 10px;
-      padding: 8px 10px;
+      padding: 7px 10px;
       font-size: 13px;
       outline: none;
     }
     .feeInput:focus { border-color:#2b579a; box-shadow: 0 0 0 3px rgba(43,87,154,0.12); }
+    .feeResultInline {
+      font-weight: 900;
+      color:#2b579a;
+      padding: 2px 0;
+    }
     .feeHint { color:#666; font-size:12px; }
-    .feeResult { margin-top: 8px; font-weight: 900; }
-    .feeResult span { color:#2b579a; }
+
+    .companyName {
+      font-size: 14px;
+      font-weight: 900;
+      color:#1f2a44;
+    }
   </style>
 </head>
 <body>
   <div class="header">📩 거래처 도메인 매칭</div>
 
+  <!-- ✅ 1) 상태 줄 제거 -->
   <div class="box">
     <div class="row"><span class="label">발신자 이메일</span> <span class="value" id="fromEmail">-</span></div>
     <div class="row"><span class="label">발신자 도메인</span> <span class="value" id="fromDomain">-</span></div>
-    <div class="row"><span class="label">상태</span> <span class="value" id="statusText">대기중</span></div>
   </div>
 
   <div class="box">
@@ -92,10 +108,12 @@
     // A=KEY(이메일/도메인)
     const KEY_COL = 0;
 
-    // B/C/D
-    const FEE_COL = 1;   // 수수료 (예: 3% 또는 3)
-    const NOTE_COL = 2;  // 특이사항
-    const BAN_COL = 3;   // 금지사항
+    // ✅ B~F 순서대로
+    const COMPANY_COL = 1;  // 거래처명 (B)
+    const FEE_COL = 2;      // 수수료 (C) (예: 3% 또는 3)
+    const NOTE_COL = 3;     // 특이사항 (D)
+    const BAN_COL = 4;      // 금지사항 (E)
+    const MEMO_COL = 5;     // 비고 (F)
 
     const FIRST_ROW_IS_HEADER = false;
 
@@ -103,7 +121,6 @@
 
     if (typeof Office === 'undefined') {
       showError("Office.js 컨텍스트가 없습니다. Outlook Add-in 안에서 열어주세요.");
-      setStatus("Outlook에서 열어주세요", "warn");
     } else {
       Office.onReady(async () => {
         try {
@@ -118,7 +135,6 @@
     async function run() {
       clearError();
       clearUI();
-      setStatus("불러오는 중...", "warn");
 
       try {
         const { fromEmail, fromDomain } = getFromInfo();
@@ -126,7 +142,7 @@
         document.getElementById('fromDomain').textContent = fromDomain || '(없음)';
 
         if (!fromDomain) {
-          setStatus("발신자 도메인을 읽지 못했습니다.", "warn");
+          setDataStatus("발신자 도메인을 읽지 못했습니다.", "warn");
           return;
         }
 
@@ -138,37 +154,40 @@
 
         if (!match) {
           setDataStatus(`매칭 없음 (${fromDomain})`, "warn");
-          setStatus("data 시트 A열에서 도메인 매칭 실패", "warn");
           setDebug(`data 시트 로드됨: rows=${dataRows.length}`);
           return;
         }
 
-        const { rowIndex, row, rawKey, normKey } = match;
-
+        const { rowIndex, row } = match;
         setDataStatus(`매칭됨 (#${rowIndex+1})`, "ok");
-        setStatus("표시 완료", "ok");
 
-        const feeRaw = String(row[FEE_COL] ?? '').trim();
-        const note = String(row[NOTE_COL] ?? '').trim();
-        const ban  = String(row[BAN_COL] ?? '').trim();
+        const company = String(row[COMPANY_COL] ?? '').trim();
+        const feeRaw  = String(row[FEE_COL] ?? '').trim();
+        const note    = String(row[NOTE_COL] ?? '').trim();
+        const ban     = String(row[BAN_COL] ?? '').trim();
+        const memo    = String(row[MEMO_COL] ?? '').trim();
 
-        // ✅ 수수료를 % 숫자로 파싱 ( "3%", "3", " 3.5 % " 등 허용 )
-        const feePct = parsePercent(feeRaw); // 예: 3 => 0.03
-        const feePctLabel = (feePct != null) ? (formatPercent(feePct)) : (feeRaw || '-');
+        const feePct = parsePercent(feeRaw); // 3 => 0.03
+        const feeLabel = (feePct != null) ? formatPercent(feePct) : (feeRaw || '-');
 
-        // ✅ KEY/도메인 칩은 숨기고 3개 섹션만 렌더
+        // ✅ 2) 거래처명/수수료/특이사항/금지사항/비고 순으로 표시
         document.getElementById('dataCard').innerHTML = `
           <div class="matchCard">
             <div class="kvGrid">
               <div class="kvItem">
+                <div class="kvTitle"><span class="dot"></span> 거래처명</div>
+                <div class="kvValue"><div class="companyName">${escapeHtml(company || '-')}</div></div>
+              </div>
+
+              <div class="kvItem">
                 <div class="kvTitle"><span class="dot green"></span> 수수료</div>
                 <div class="kvValue">
-                  <div class="feeRow">
-                    <span class="feePill">수수료율: ${escapeHtml(feePctLabel || '-')}</span>
-                    <input class="feeInput" id="feeBaseInput" inputmode="numeric" placeholder="금액 입력 (예: 10000)" />
-                    <span class="feeHint">입력하면 자동 계산</span>
+                  <div class="feeLine">
+                    <span class="feePill">수수료율 ${escapeHtml(feeLabel || '-')}</span>
+                    <input class="feeInput" id="feeBaseInput" inputmode="numeric" placeholder="금액(예: 10000)" />
+                    <span class="feeResultInline" id="feeResultInline">= -</span>
                   </div>
-                  <div class="feeResult" id="feeResultText">수수료 금액: <span>-</span></div>
+                  <div class="feeHint" id="feeHint"></div>
                 </div>
               </div>
 
@@ -181,50 +200,52 @@
                 <div class="kvTitle"><span class="dot red"></span> 금지사항</div>
                 <div class="kvValue">${escapeHtml(ban || '-')}</div>
               </div>
+
+              <div class="kvItem">
+                <div class="kvTitle"><span class="dot gray"></span> 비고</div>
+                <div class="kvValue">${escapeHtml(memo || '-')}</div>
+              </div>
             </div>
           </div>
         `;
 
-        // ✅ 입력 이벤트 연결 (렌더 후)
-        setupFeeCalculator(feePct, feePctLabel);
+        setupFeeCalculator(feePct);
 
         setDebug(`data 시트 로드됨: rows=${dataRows.length}`);
 
       } catch (e) {
         console.error(e);
         showError((e && e.message) ? e.message : String(e));
-        setStatus("에러 발생", "warn");
+        setDataStatus("에러 발생", "warn");
       }
     }
 
-    function setupFeeCalculator(feePct, feePctLabel) {
+    function setupFeeCalculator(feePct) {
       const input = document.getElementById('feeBaseInput');
-      const out = document.getElementById('feeResultText');
-
+      const out = document.getElementById('feeResultInline');
+      const hint = document.getElementById('feeHint');
       if (!input || !out) return;
 
       const calc = () => {
-        const raw = String(input.value || '');
-        const base = parseNumber(raw);
+        const base = parseNumber(input.value || '');
 
-        // 수수료율 파싱 실패면 계산 불가
         if (feePct == null) {
-          out.innerHTML = `수수료 금액: <span>-</span> <div class="feeHint">수수료율을 B열에 "3%"처럼 넣어주세요.</div>`;
+          out.textContent = "= -";
+          if (hint) hint.textContent = "수수료율을 C열에 3%처럼 입력해 주세요.";
           return;
         }
+        if (hint) hint.textContent = "";
 
         if (base == null) {
-          out.innerHTML = `수수료 금액: <span>-</span>`;
+          out.textContent = "= -";
           return;
         }
 
-        const feeAmount = Math.round(base * feePct); // 원 단위 반올림(원하면 내림/올림으로 변경 가능)
-        out.innerHTML = `수수료 금액: <span>${formatNumber(feeAmount)}</span>`;
+        const feeAmount = Math.round(base * feePct);
+        out.textContent = `= ${formatNumber(feeAmount)}`;
       };
 
-      // 입력 즉시 반영
       input.addEventListener('input', calc);
-      // 초기값 계산(빈 값이면 -)
       calc();
     }
 
@@ -243,30 +264,23 @@
 
     async function fetchGvizRows(url) {
       const res = await fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store' });
-
       if (!res.ok) {
         const body = await safeText(res);
         throw new Error(`Sheet fetch failed: HTTP ${res.status} ${res.statusText}\n\n응답 일부:\n${(body || '').slice(0, 300)}`);
       }
 
       const text = await res.text();
-
       if (!text.includes("google.visualization") && !text.startsWith("/*O_o*/")) {
-        throw new Error(
-          "gviz JSON 형식이 아닙니다. (로그인/권한/차단 가능)\n\n응답 일부:\n" +
-          text.slice(0, 300)
-        );
+        throw new Error("gviz JSON 형식이 아닙니다. (로그인/권한/차단 가능)\n\n응답 일부:\n" + text.slice(0, 300));
       }
 
       const jsonText = text.substring(47).slice(0, -2);
       const json = JSON.parse(jsonText);
 
-      const rows = (json.table.rows || []).map(r => (r.c || []).map(cell => {
+      return (json.table.rows || []).map(r => (r.c || []).map(cell => {
         if (!cell) return '';
         return (cell.f != null ? cell.f : cell.v) ?? '';
       }));
-
-      return rows;
     }
 
     async function safeText(res) {
@@ -276,17 +290,12 @@
     function normalizeToDomain(value) {
       if (value == null) return '';
       let s = String(value);
-
       s = s.replace(/\u00A0/g, ' ').trim().toLowerCase();
       s = s.replace(/^https?:\/\//, '');
       s = s.replace(/,.*$/, '');
       s = s.replace(/\/.*$/, '');
       s = s.replace(/^[.@]+/, '');
-
-      if (s.includes('@')) {
-        s = s.slice(s.lastIndexOf('@') + 1).trim();
-      }
-
+      if (s.includes('@')) s = s.slice(s.lastIndexOf('@') + 1).trim();
       return s;
     }
 
@@ -298,22 +307,10 @@
         const keyDomain = normalizeToDomain(rawKey);
         if (!keyDomain) continue;
 
-        if (keyDomain === d) {
-          return { rowIndex: i, row: rows[i], rawKey, normKey: keyDomain };
-        }
-
-        if (d.endsWith('.' + keyDomain) || keyDomain.endsWith('.' + d)) {
-          return { rowIndex: i, row: rows[i], rawKey, normKey: keyDomain };
-        }
+        if (keyDomain === d) return { rowIndex: i, row: rows[i] };
+        if (d.endsWith('.' + keyDomain) || keyDomain.endsWith('.' + d)) return { rowIndex: i, row: rows[i] };
       }
       return null;
-    }
-
-    function setStatus(text, tone) {
-      const el = document.getElementById('statusText');
-      el.textContent = text;
-      el.classList.remove('ok', 'warn');
-      if (tone) el.classList.add(tone);
     }
 
     function setDataStatus(text, tone) {
@@ -350,25 +347,19 @@
         .replaceAll("'", "&#039;");
     }
 
-    // --- helpers: percent/number ---
+    // helpers
     function parsePercent(raw) {
       if (raw == null) return null;
       const s = String(raw).replace(/\s/g, '');
       if (!s) return null;
-
-      // "3%" or "3" or "3.5%" 모두 허용
       const cleaned = s.replace('%', '');
       const n = Number(cleaned);
       if (!isFinite(n)) return null;
-
-      // 3 => 0.03
       return n / 100;
     }
 
     function formatPercent(p) {
-      // 0.03 => "3%"
       const n = p * 100;
-      // 소수점 있으면 깔끔하게
       const txt = (Math.round(n * 100) / 100).toString();
       return `${txt}%`;
     }
