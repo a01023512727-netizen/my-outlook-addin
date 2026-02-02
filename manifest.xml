@@ -10,7 +10,7 @@
     <Host Name="Mailbox" />
   </Hosts>
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://YOUR_ID.github.io/my-outlook-addin/taskpane.html" />
+    <SourceLocation DefaultValue="https://a01023512727-netizen.github.io/my-outlook-addin/taskpane.html" />
   </DefaultSettings>
   <Permissions>ReadItem</Permissions>
   <Rule xsi:type="RuleCollection" Mode="And">
