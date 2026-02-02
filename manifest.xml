@@ -51,7 +51,7 @@
         <bt:Image id="icon" DefaultValue="https://cdn-icons-png.flaticon.com/512/281/281760.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="taskpaneUrl" DefaultValue="https://YOUR_ID.github.io/my-outlook-addin/taskpane.html" />
+        <bt:Url id="taskpaneUrl" DefaultValue="https://a01023512727-netizen.github.io/my-outlook-addin/taskpane.html" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="groupLabel" DefaultValue="데이터 도구" />
