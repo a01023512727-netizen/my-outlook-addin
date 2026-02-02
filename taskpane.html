@@ -2,99 +2,37 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>거래처 도메인 매칭</title>
+  <title>거래처 도메인 조회</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <style>
     body { font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; background: #fff; }
-    .header { color: #2b579a; font-size: 16px; font-weight: 800; border-bottom: 2px solid #2b579a; padding-bottom: 6px; margin-bottom: 12px; }
-
-    .box { border: 1px solid #e5e5e5; border-radius: 12px; padding: 12px; margin-bottom: 12px; background: #fff; }
-    .row { margin: 6px 0; font-size: 13px; display:flex; gap:10px; align-items: baseline; }
-    .label { color:#666; width: 120px; flex: 0 0 120px; }
-    .value { font-weight: 800; word-break: break-all; }
+    .header { color: #2b579a; font-size: 16px; font-weight: 700; border-bottom: 2px solid #2b579a; padding-bottom: 6px; margin-bottom: 12px; }
+    .box { border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+    .row { margin: 6px 0; font-size: 13px; }
+    .label { color:#666; display:inline-block; width: 120px; }
+    .value { font-weight: 700; }
     .ok { color: #0a7a0a; }
     .warn { color: #b36b00; }
     .err { color: #b00020; white-space: pre-wrap; font-size: 12px; line-height: 1.4; }
-
-    button { padding: 8px 10px; border-radius: 10px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; font-weight: 700; }
-    button:hover { background:#f3f3f3; }
-
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
+    th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
+    td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
+    button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
     .muted { color:#777; font-size:12px; white-space:pre-wrap; margin-top:8px; }
-
-    /* 카드 */
-    .matchCard {
-      border: 1px solid #e6e6e6;
-      border-radius: 14px;
-      padding: 12px;
-      margin-top: 10px;
-      background: linear-gradient(180deg, #fbfbff 0%, #ffffff 70%);
-      box-shadow: 0 1px 0 rgba(0,0,0,0.03);
-    }
-    .kvGrid { display:grid; grid-template-columns: 1fr; gap: 10px; }
-    .kvItem { border: 1px solid #ededed; border-radius: 12px; padding: 5px; background: #fff; }
-    .kvTitle { font-size: 12px; color: #555; font-weight: 900; display:flex; align-items:center; gap:8px; margin-bottom: 2px; }
-    .kvValue { font-size: 13px; color: #222; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-
-    .dot { width: 8px; height: 8px; border-radius: 999px; display:inline-block; background: #2b579a; }
-    .dot.green { background:#0a7a0a; }
-    .dot.orange { background:#b36b00; }
-    .dot.red { background:#b00020; }
-    .dot.gray { background:#666; }
-
-    /* 수수료 라인: 간격 줄이기 */
-    .feeLine {
-      display:flex;
-      align-items:center;
-      gap: 8px;              /* ✅ 간격 좁게 */
-      flex-wrap: wrap;
-      margin-top: 4px;       /* ✅ 위 여백 줄이기 */
-    }
-    .feePill {
-      display:inline-flex; align-items:center; gap:6px;
-      border: 1px solid #e3e8ff;
-      background:#f4f6ff;
-      color:#1f3b8a;
-      border-radius: 999px;
-      padding: 4px 8px;      /* ✅ 패딩 줄이기 */
-      font-size: 12px;
-      font-weight: 900;
-      line-height: 1.2;
-    }
-    .feeInput {
-      width: 140px;          /* ✅ 너무 길지 않게 */
-      border: 1px solid #ddd;
-      border-radius: 10px;
-      padding: 7px 10px;
-      font-size: 13px;
-      outline: none;
-    }
-    .feeInput:focus { border-color:#2b579a; box-shadow: 0 0 0 3px rgba(43,87,154,0.12); }
-    .feeResultInline {
-      font-weight: 900;
-      color:#2b579a;
-      padding: 2px 0;
-    }
-    .feeHint { display: none; }
-
-    .companyName {
-      font-size: 14px;
-      font-weight: 900;
-      color:#1f2a44;
-    }
   </style>
 </head>
 <body>
-  <div class="header">📩 거래처 도메인 매칭</div>
+  <div class="header">📩 거래처 도메인 조회</div>
 
-  <!-- ✅ 1) 상태 줄 제거 -->
   <div class="box">
     <div class="row"><span class="label">발신자 이메일</span> <span class="value" id="fromEmail">-</span></div>
     <div class="row"><span class="label">발신자 도메인</span> <span class="value" id="fromDomain">-</span></div>
+    <div class="row"><span class="label">상태</span> <span class="value" id="statusText">대기중</span></div>
   </div>
 
   <div class="box">
-    <div class="row"><span class="label">거래처 매칭</span> <span class="value" id="dataStatus">-</span></div>
-    <div id="dataCard"></div>
+    <div class="row"><span class="label">조회 결과</span> <span class="value" id="resultStatus">-</span></div>
+    <div id="resultTable"></div>
     <div class="muted" id="debug"></div>
   </div>
 
@@ -102,39 +40,35 @@
   <div class="err" id="error" style="margin-top:10px;"></div>
 
   <script>
-    const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
-    const DATA_SHEET_NAME = 'data';
-
-    // A=KEY(이메일/도메인)
-    const KEY_COL = 0;
-
-    // ✅ B~F 순서대로
-    const COMPANY_COL = 1;  // 거래처명 (B)
-    const FEE_COL = 2;      // 수수료 (C) (예: 3% 또는 3)
-    const NOTE_COL = 3;     // 특이사항 (D)
-    const BAN_COL = 4;      // 금지사항 (E)
-    const MEMO_COL = 5;     // 비고 (F)
-
-    const FIRST_ROW_IS_HEADER = false;
+    // ✅ 여기만 너의 Apps Script 웹앱 URL로 교체
+    const SCRIPT_API_URL = "https://script.google.com/macros/s/AAAAAAA/exec";
 
     document.getElementById('btnRefresh').addEventListener('click', run);
 
     if (typeof Office === 'undefined') {
       showError("Office.js 컨텍스트가 없습니다. Outlook Add-in 안에서 열어주세요.");
+      setStatus("Outlook에서 열어주세요", "warn");
     } else {
-      Office.onReady(async () => {
+      Office.onReady(() => {
+        // ✅ 메일이 바뀌면 자동 갱신
         try {
-          Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => run());
+          Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => {
+            run();
+          });
         } catch (e) {
           console.error("ItemChanged handler failed:", e);
         }
+
         run();
       });
     }
 
     async function run() {
       clearError();
-      clearUI();
+      clearResult();
+      setDebug("");
+      setStatus("불러오는 중...", "warn");
+      setResultStatus("-");
 
       try {
         const { fromEmail, fromDomain } = getFromInfo();
@@ -142,192 +76,113 @@
         document.getElementById('fromDomain').textContent = fromDomain || '(없음)';
 
         if (!fromDomain) {
-          setDataStatus("발신자 도메인을 읽지 못했습니다.", "warn");
+          setStatus("발신자 도메인을 읽지 못했습니다.", "warn");
           return;
         }
 
-        const url = buildGvizUrl(SHEET_ID, DATA_SHEET_NAME);
-        const rows = await fetchGvizRows(url);
-        const dataRows = (FIRST_ROW_IS_HEADER && rows.length) ? rows.slice(1) : rows;
+        const url = `${SCRIPT_API_URL}?domain=${encodeURIComponent(fromDomain)}&_ts=${Date.now()}`;
 
-        const match = findFirstMatchByDomainInA(dataRows, fromDomain);
+        const res = await fetch(url, { method: "GET", redirect: "follow", cache: "no-store" });
+        const text = await res.text();
 
-        if (!match) {
-          setDataStatus(`매칭 없음 (${fromDomain})`, "warn");
-          setDebug(`data 시트 로드됨: rows=${dataRows.length}`);
+        let json;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          throw new Error("Apps Script 응답이 JSON이 아닙니다.\n\n응답 일부:\n" + text.slice(0, 400));
+        }
+
+        // 디버그로 원문도 보여주기
+        setDebug("API URL:\n" + url + "\n\n응답:\n" + JSON.stringify(json, null, 2));
+
+        if (!json.allowed) {
+          setResultStatus("권한/등록 없음", "warn");
+          setStatus("domain 시트에 등록되지 않은 도메인입니다.", "warn");
           return;
         }
 
-        const { rowIndex, row } = match;
-        setDataStatus(`매칭됨 (#${rowIndex+1})`, "ok");
+        if (json.allowed && json.matched === false) {
+          setResultStatus("등록됨 / data 매칭 없음", "warn");
+          setStatus("domain에는 있지만 data에는 매칭이 없습니다.", "warn");
+          return;
+        }
 
-        const company = String(row[COMPANY_COL] ?? '').trim();
-        const feeRaw  = String(row[FEE_COL] ?? '').trim();
-        const note    = String(row[NOTE_COL] ?? '').trim();
-        const ban     = String(row[BAN_COL] ?? '').trim();
-        const memo    = String(row[MEMO_COL] ?? '').trim();
+        // 기대 응답: {"allowed":true,"domain":"tidesquare.com","name":"타이드스퀘어","age":0.03,"row":2}
+        setResultStatus("매칭됨 ✅", "ok");
+        setStatus("표시 완료", "ok");
 
-        const feePct = parsePercent(feeRaw); // 3 => 0.03
-        const feeLabel = (feePct != null) ? formatPercent(feePct) : (feeRaw || '-');
-
-        // ✅ 2) 거래처명/수수료/특이사항/금지사항/비고 순으로 표시
-        document.getElementById('dataCard').innerHTML = `
-          <div class="matchCard">
-            <div class="kvGrid">
-              <div class="kvItem">
-                <div class="kvTitle"><span class="dot"></span> 거래처명</div>
-                <div class="kvValue"><div class="companyName">${escapeHtml(company || '-')}</div></div>
-              </div>
-
-              <div class="kvItem">
-                <div class="kvTitle"><span class="dot green"></span> 수수료</div>
-                <div class="kvValue">
-                  <div class="feeLine">
-                    <span class="feePill">수수료율 ${escapeHtml(feeLabel || '-')}</span>
-                    <input class="feeInput" id="feeBaseInput" inputmode="numeric" placeholder="항공료(예: 10000)" />
-                    <span class="feeResultInline" id="feeResultInline">= -</span>
-                  </div>
-                  <div class="feeHint" id="feeHint"></div>
-                </div>
-              </div>
-
-              <div class="kvItem">
-                <div class="kvTitle"><span class="dot orange"></span> 특이사항</div>
-                <div class="kvValue">${escapeHtml(note || '-')}</div>
-              </div>
-
-              <div class="kvItem">
-                <div class="kvTitle"><span class="dot red"></span> 금지사항</div>
-                <div class="kvValue">${escapeHtml(ban || '-')}</div>
-              </div>
-
-              <div class="kvItem">
-                <div class="kvTitle"><span class="dot gray"></span> 비고</div>
-                <div class="kvValue">${escapeHtml(memo || '-')}</div>
-              </div>
-            </div>
-          </div>
-        `;
-
-        setupFeeCalculator(feePct);
-
-        setDebug(`data 시트 로드됨: rows=${dataRows.length}`);
+        renderResult(json);
 
       } catch (e) {
         console.error(e);
         showError((e && e.message) ? e.message : String(e));
-        setDataStatus("에러 발생", "warn");
+        setStatus("에러 발생", "warn");
       }
-    }
-
-    function setupFeeCalculator(feePct) {
-      const input = document.getElementById('feeBaseInput');
-      const out = document.getElementById('feeResultInline');
-      const hint = document.getElementById('feeHint');
-      if (!input || !out) return;
-
-      const calc = () => {
-        const base = parseNumber(input.value || '');
-
-        if (feePct == null) {
-          out.textContent = "= -";
-          if (hint) hint.textContent = "수수료율을 C열에 3%처럼 입력해 주세요.";
-          return;
-        }
-        if (hint) hint.textContent = "";
-
-        if (base == null) {
-          out.textContent = "= -";
-          return;
-        }
-
-        const feeAmount = Math.round(base * feePct);
-        out.textContent = `= ${formatNumber(feeAmount)}`;
-      };
-
-      input.addEventListener('input', calc);
-      calc();
     }
 
     function getFromInfo() {
       const item = Office?.context?.mailbox?.item;
       if (!item) throw new Error("Office.context.mailbox.item 이 없습니다. (메일 읽기 화면에서 열어주세요)");
+
       const fromEmail = item?.from?.emailAddress || '';
       const fromDomain = normalizeToDomain(fromEmail);
       return { fromEmail, fromDomain };
     }
 
-    function buildGvizUrl(sheetId, sheetName) {
-      const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-      return `${base}&_ts=${Date.now()}`;
-    }
-
-    async function fetchGvizRows(url) {
-      const res = await fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store' });
-      if (!res.ok) {
-        const body = await safeText(res);
-        throw new Error(`Sheet fetch failed: HTTP ${res.status} ${res.statusText}\n\n응답 일부:\n${(body || '').slice(0, 300)}`);
-      }
-
-      const text = await res.text();
-      if (!text.includes("google.visualization") && !text.startsWith("/*O_o*/")) {
-        throw new Error("gviz JSON 형식이 아닙니다. (로그인/권한/차단 가능)\n\n응답 일부:\n" + text.slice(0, 300));
-      }
-
-      const jsonText = text.substring(47).slice(0, -2);
-      const json = JSON.parse(jsonText);
-
-      return (json.table.rows || []).map(r => (r.c || []).map(cell => {
-        if (!cell) return '';
-        return (cell.f != null ? cell.f : cell.v) ?? '';
-      }));
-    }
-
-    async function safeText(res) {
-      try { return await res.text(); } catch { return ""; }
-    }
-
+    // 이메일/도메인 입력을 "도메인"으로 정규화
     function normalizeToDomain(value) {
       if (value == null) return '';
       let s = String(value);
+
       s = s.replace(/\u00A0/g, ' ').trim().toLowerCase();
       s = s.replace(/^https?:\/\//, '');
       s = s.replace(/,.*$/, '');
       s = s.replace(/\/.*$/, '');
       s = s.replace(/^[.@]+/, '');
+
       if (s.includes('@')) s = s.slice(s.lastIndexOf('@') + 1).trim();
       return s;
     }
 
-    function findFirstMatchByDomainInA(rows, fromDomain) {
-      const d = normalizeToDomain(fromDomain);
+    function renderResult(json) {
+      const rows = [
+        ["도메인", json.domain ?? ""],
+        ["이름", json.name ?? ""],
+        ["age", String(json.age ?? "")],
+        ["row", String(json.row ?? "")]
+      ];
 
-      for (let i = 0; i < rows.length; i++) {
-        const rawKey = String(rows[i][KEY_COL] ?? '');
-        const keyDomain = normalizeToDomain(rawKey);
-        if (!keyDomain) continue;
-
-        if (keyDomain === d) return { rowIndex: i, row: rows[i] };
-        if (d.endsWith('.' + keyDomain) || keyDomain.endsWith('.' + d)) return { rowIndex: i, row: rows[i] };
-      }
-      return null;
+      const html = `
+        <table>
+          <thead><tr><th>항목</th><th>값</th></tr></thead>
+          <tbody>
+            ${rows.map(([k,v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join("")}
+          </tbody>
+        </table>
+      `;
+      document.getElementById('resultTable').innerHTML = html;
     }
 
-    function setDataStatus(text, tone) {
-      const el = document.getElementById('dataStatus');
+    function setStatus(text, tone) {
+      const el = document.getElementById('statusText');
       el.textContent = text;
       el.classList.remove('ok', 'warn');
       if (tone) el.classList.add(tone);
     }
 
-    function setDebug(text) {
-      document.getElementById('debug').textContent = text || '';
+    function setResultStatus(text, tone) {
+      const el = document.getElementById('resultStatus');
+      el.textContent = text;
+      el.classList.remove('ok', 'warn');
+      if (tone) el.classList.add(tone);
     }
 
-    function clearUI() {
-      document.getElementById('dataCard').innerHTML = '';
-      document.getElementById('debug').textContent = '';
-      document.getElementById('dataStatus').textContent = '-';
+    function clearResult() {
+      document.getElementById('resultTable').innerHTML = '';
+    }
+
+    function setDebug(text) {
+      document.getElementById('debug').textContent = text || '';
     }
 
     function showError(msg) {
@@ -345,36 +200,6 @@
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;");
-    }
-
-    // helpers
-    function parsePercent(raw) {
-      if (raw == null) return null;
-      const s = String(raw).replace(/\s/g, '');
-      if (!s) return null;
-      const cleaned = s.replace('%', '');
-      const n = Number(cleaned);
-      if (!isFinite(n)) return null;
-      return n / 100;
-    }
-
-    function formatPercent(p) {
-      const n = p * 100;
-      const txt = (Math.round(n * 100) / 100).toString();
-      return `${txt}%`;
-    }
-
-    function parseNumber(raw) {
-      if (raw == null) return null;
-      const s = String(raw).replace(/[,\s]/g, '');
-      if (!s) return null;
-      const n = Number(s);
-      if (!isFinite(n)) return null;
-      return n;
-    }
-
-    function formatNumber(n) {
-      try { return n.toLocaleString('ko-KR'); } catch { return String(n); }
     }
   </script>
 </body>
