@@ -14,11 +14,13 @@
     .ok { color: #0a7a0a; }
     .warn { color: #b36b00; }
     .err { color: #b00020; white-space: pre-wrap; font-size: 12px; line-height: 1.4; }
+
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
     th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
     td { padding: 8px; border: 1px solid #e0e0e0; color: #555; }
-    tr:nth-child(even) { background-color: #fafafa; }
+
     button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #ddd; margin-left:6px; }
   </style>
 </head>
 <body>
@@ -31,8 +33,18 @@
   </div>
 
   <div class="box">
-    <div class="row"><span class="label">Sheet1 매칭</span> <span class="value" id="matchTitle">-</span></div>
-    <div id="matchTable"></div>
+    <div class="row">
+      <span class="label">domain 시트</span>
+      <span class="value" id="domainStatus">-</span>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="row">
+      <span class="label">data 시트</span>
+      <span class="value" id="dataStatus">-</span>
+    </div>
+    <div id="dataTable"></div>
   </div>
 
   <button id="btnRefresh">새로고침</button>
@@ -42,17 +54,23 @@
     // ✅ 네 구글 시트 ID
     const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
 
-    // ✅ "첫번째 sheet(탭) 이름"을 정확히 적어줘 (예: Sheet1, 거래처, 고객목록 등)
-    const SHEET1_NAME = 'domain';
+    // ✅ 시트 탭 이름들 (너가 말한대로)
+    const DOMAIN_SHEET_NAME = 'domain';
+    const DATA_SHEET_NAME = 'data';
 
-    // gviz URL (Sheet1 전체를 JSON으로 가져옴)
-    const SHEET1_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET1_NAME)}`;
+    // gviz URL
+    const DOMAIN_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(DOMAIN_SHEET_NAME)}`;
+    const DATA_URL   = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(DATA_SHEET_NAME)}`;
 
-    // Sheet1에서 "도메인 컬럼"이 몇 번째인지(0부터 시작)
-    // 네 예시: A거래처 / test.com  => [거래처명, 도메인] 이면 도메인은 1번 인덱스
-    const DOMAIN_COL_INDEX = 2;
+    // ✅ domain 시트에서 도메인이 들어있는 컬럼 인덱스(0부터)
+    // 예: [거래처명, 도메인] 이면 도메인=1
+    const DOMAIN_COL_INDEX_IN_DOMAIN_SHEET = 1;
 
-    // 첫 행을 헤더로 쓸지 여부 (Sheet1 첫 줄이 제목줄이면 true 추천)
+    // ✅ data 시트에서 도메인이 들어있는 컬럼 인덱스(0부터)
+    // 예: [도메인, 이름, 직급] 이면 도메인=0
+    const DOMAIN_COL_INDEX_IN_DATA_SHEET = 0;
+
+    // domain/data 시트의 첫 행이 헤더(제목줄)면 true
     const FIRST_ROW_IS_HEADER = true;
 
     document.getElementById('btnRefresh').addEventListener('click', run);
@@ -62,7 +80,6 @@
       setStatus("Outlook에서 열어주세요", "warn");
     } else {
       Office.onReady(() => {
-        // Outlook 컨텍스트 준비 확인 후 실행
         if (!isOutlookContextReady()) {
           setStatus("Outlook 컨텍스트 준비 중...", "warn");
           setTimeout(() => {
@@ -84,8 +101,10 @@
 
     async function run() {
       clearError();
-      clearMatch();
+      clearData();
       setStatus("불러오는 중...", "warn");
+      setDomainStatus("-");
+      setDataStatus("-");
 
       try {
         const { fromEmail, fromDomain } = getFromInfo();
@@ -97,29 +116,38 @@
           return;
         }
 
-        // ✅ Sheet1에서 “도메인 매칭된 행 1개”만 찾기
-        const sheet1 = await fetchGvizTable(SHEET1_URL);
+        // 1) domain 시트에서 “이 도메인이 등록되어 있는지” 확인
+        const domainTable = await fetchGvizTable(DOMAIN_URL);
+        let domainRows = domainTable.rows;
+        if (FIRST_ROW_IS_HEADER && domainRows.length) domainRows = domainRows.slice(1);
 
-        // 헤더(컬럼명) & 데이터
-        const headers = sheet1.headers; // [{label, ...}]
-        let rows = sheet1.rows;         // 2차원 배열
+        const isAllowed = !!findRowByDomain(domainRows, fromDomain, DOMAIN_COL_INDEX_IN_DOMAIN_SHEET);
 
-        // 첫 행이 헤더면 제거(표시용 헤더는 headers.label 사용)
-        if (FIRST_ROW_IS_HEADER && rows.length) {
-          rows = rows.slice(1);
-        }
-
-        const matchedRow = findRowByDomain(rows, fromDomain, DOMAIN_COL_INDEX);
-
-        if (!matchedRow) {
-          document.getElementById('matchTitle').textContent = "매칭 없음";
-          setStatus(`Sheet1에 ${fromDomain} 이(가) 없습니다`, "warn");
+        if (!isAllowed) {
+          setDomainStatus(`미등록 (${fromDomain})`, "warn");
+          setStatus("등록되지 않은 도메인이라 data 표시를 생략합니다.", "warn");
           return;
         }
 
-        document.getElementById('matchTitle').textContent = "매칭됨 ✅";
-        renderSingleRowTable(headers, matchedRow);
-        setStatus(`표시 완료: ${fromDomain}`, "ok");
+        setDomainStatus(`등록됨 (${fromDomain})`, "ok");
+
+        // 2) data 시트에서 “도메인 매칭된 행 1개”만 찾아서 표시
+        const dataTable = await fetchGvizTable(DATA_URL);
+        let dataRows = dataTable.rows;
+        if (FIRST_ROW_IS_HEADER && dataRows.length) dataRows = dataRows.slice(1);
+
+        const matchedDataRow = findRowByDomain(dataRows, fromDomain, DOMAIN_COL_INDEX_IN_DATA_SHEET);
+
+        if (!matchedDataRow) {
+          setDataStatus(`매칭 없음 (${fromDomain})`, "warn");
+          setStatus("domain에는 있지만 data에는 해당 도메인이 없습니다.", "warn");
+          return;
+        }
+
+        setDataStatus(`매칭됨 (${fromDomain})`, "ok");
+        renderSingleRowTable(dataTable.headers, matchedDataRow);
+
+        setStatus("표시 완료", "ok");
 
       } catch (e) {
         console.error(e);
@@ -152,9 +180,7 @@
       const jsonText = text.substring(47).slice(0, -2);
       const json = JSON.parse(jsonText);
 
-      const headers = (json.table.cols || []).map(c => ({
-        label: c.label || ''
-      }));
+      const headers = (json.table.cols || []).map((c, idx) => ({ label: c.label || `COL${idx + 1}` }));
 
       const rows = (json.table.rows || []).map(r => (r.c || []).map(cell => {
         if (!cell) return '';
@@ -170,22 +196,19 @@
         const cell = String(row[domainColIndex] ?? '').trim().toLowerCase();
         if (!cell) continue;
 
-        // 정확 일치
         if (cell === d) return row;
 
-        // 서브도메인까지 허용하고 싶으면(예: mail.test.com → test.com)
-        // if (cell === d || d.endsWith('.' + cell)) return row;
+        // 서브도메인 허용하고 싶으면 아래 주석 해제
+        // if (d === cell || d.endsWith('.' + cell)) return row;
       }
       return null;
     }
 
     function renderSingleRowTable(headers, row) {
-      // 헤더 라벨은 gviz cols.label 기반(시트 첫 줄 헤더와는 별개)
-      // cols.label이 비어 있으면 A,B,C…처럼 처리하기
-      const ths = headers.map((h, idx) => `<th>${escapeHtml(h.label || `COL${idx+1}`)}</th>`).join('');
+      const ths = headers.map(h => `<th>${escapeHtml(h.label || '')}</th>`).join('');
       const tds = row.map(v => `<td>${escapeHtml(String(v ?? ''))}</td>`).join('');
 
-      document.getElementById('matchTable').innerHTML = `
+      document.getElementById('dataTable').innerHTML = `
         <table>
           <thead><tr>${ths}</tr></thead>
           <tbody><tr>${tds}</tr></tbody>
@@ -193,13 +216,26 @@
       `;
     }
 
-    function clearMatch() {
-      document.getElementById('matchTitle').textContent = '-';
-      document.getElementById('matchTable').innerHTML = '';
+    function clearData() {
+      document.getElementById('dataTable').innerHTML = '';
     }
 
     function setStatus(text, tone) {
       const el = document.getElementById('statusText');
+      el.textContent = text;
+      el.classList.remove('ok', 'warn');
+      if (tone) el.classList.add(tone);
+    }
+
+    function setDomainStatus(text, tone) {
+      const el = document.getElementById('domainStatus');
+      el.textContent = text;
+      el.classList.remove('ok', 'warn');
+      if (tone) el.classList.add(tone);
+    }
+
+    function setDataStatus(text, tone) {
+      const el = document.getElementById('dataStatus');
       el.textContent = text;
       el.classList.remove('ok', 'warn');
       if (tone) el.classList.add(tone);
