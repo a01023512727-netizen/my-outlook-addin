@@ -21,7 +21,7 @@
 
     .muted { color:#777; font-size:12px; white-space:pre-wrap; margin-top:8px; }
 
-    /* ✅ 카드 UI */
+    /* 카드 */
     .matchCard {
       border: 1px solid #e6e6e6;
       border-radius: 14px;
@@ -30,57 +30,41 @@
       background: linear-gradient(180deg, #fbfbff 0%, #ffffff 70%);
       box-shadow: 0 1px 0 rgba(0,0,0,0.03);
     }
-    .chipRow { display:flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-    .chip {
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: #f4f6ff;
-      border: 1px solid #e3e8ff;
-      font-size: 12px;
-      color: #1f3b8a;
-      font-weight: 800;
-    }
-    .chip strong { color:#2b579a; }
+    .kvGrid { display:grid; grid-template-columns: 1fr; gap: 10px; }
+    .kvItem { border: 1px solid #ededed; border-radius: 12px; padding: 10px; background: #fff; }
+    .kvTitle { font-size: 12px; color: #555; font-weight: 900; display:flex; align-items:center; gap:8px; margin-bottom: 6px; }
+    .kvValue { font-size: 13px; color: #222; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
-    .kvGrid {
-      display:grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
-    }
-    .kvItem {
-      border: 1px solid #ededed;
-      border-radius: 12px;
-      padding: 10px;
-      background: #fff;
-    }
-    .kvTitle {
-      font-size: 12px;
-      color: #555;
-      font-weight: 900;
-      display:flex;
-      align-items:center;
-      gap:8px;
-      margin-bottom: 6px;
-    }
-    .kvValue {
-      font-size: 13px;
-      color: #222;
-      line-height: 1.5;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    /* 작은 아이콘 느낌 */
-    .dot {
-      width: 8px; height: 8px; border-radius: 999px; display:inline-block;
-      background: #2b579a;
-    }
+    .dot { width: 8px; height: 8px; border-radius: 999px; display:inline-block; background: #2b579a; }
     .dot.green { background:#0a7a0a; }
     .dot.orange { background:#b36b00; }
     .dot.red { background:#b00020; }
+
+    /* 수수료 계산 UI */
+    .feeRow { display:flex; gap:10px; align-items:center; flex-wrap: wrap; margin-top: 8px; }
+    .feePill {
+      display:inline-flex; align-items:center; gap:6px;
+      border: 1px solid #e3e8ff;
+      background:#f4f6ff;
+      color:#1f3b8a;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .feeInput {
+      flex: 1 1 160px;
+      min-width: 160px;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 13px;
+      outline: none;
+    }
+    .feeInput:focus { border-color:#2b579a; box-shadow: 0 0 0 3px rgba(43,87,154,0.12); }
+    .feeHint { color:#666; font-size:12px; }
+    .feeResult { margin-top: 8px; font-weight: 900; }
+    .feeResult span { color:#2b579a; }
   </style>
 </head>
 <body>
@@ -93,7 +77,6 @@
   </div>
 
   <div class="box">
-    <!-- ✅ 라벨 변경 -->
     <div class="row"><span class="label">거래처 매칭</span> <span class="value" id="dataStatus">-</span></div>
     <div id="dataCard"></div>
     <div class="muted" id="debug"></div>
@@ -104,16 +87,15 @@
 
   <script>
     const SHEET_ID = '1DW0Rl4lDhw8lfEF0lRxXWA21WHLBSLNVrOq4eCwQG4w';
-
     const DATA_SHEET_NAME = 'data';
 
     // A=KEY(이메일/도메인)
     const KEY_COL = 0;
 
-    // ✅ B/C/D를 새 의미로 사용
-    const FEE_COL = 1;       // 수수료 (예: 3%)
-    const NOTE_COL = 2;      // 특이사항 (긴 텍스트)
-    const BAN_COL = 3;       // 금지사항 (긴 텍스트)
+    // B/C/D
+    const FEE_COL = 1;   // 수수료 (예: 3% 또는 3)
+    const NOTE_COL = 2;  // 특이사항
+    const BAN_COL = 3;   // 금지사항
 
     const FIRST_ROW_IS_HEADER = false;
 
@@ -125,13 +107,10 @@
     } else {
       Office.onReady(async () => {
         try {
-          Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => {
-            run();
-          });
+          Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => run());
         } catch (e) {
           console.error("ItemChanged handler failed:", e);
         }
-
         run();
       });
     }
@@ -160,17 +139,7 @@
         if (!match) {
           setDataStatus(`매칭 없음 (${fromDomain})`, "warn");
           setStatus("data 시트 A열에서 도메인 매칭 실패", "warn");
-
-          const sample = dataRows.slice(0, 30).map((r, idx) => {
-            const raw = String(r[KEY_COL] ?? '');
-            const norm = normalizeToDomain(raw);
-            return `${idx+1}. raw="${raw}" -> domain="${norm}"`;
-          }).join("\n");
-
-          setDebug(
-            `data 시트 로드됨: rows=${dataRows.length}\n\n` +
-            "A열 디버그(상위 30개):\n" + sample
-          );
+          setDebug(`data 시트 로드됨: rows=${dataRows.length}`);
           return;
         }
 
@@ -179,22 +148,28 @@
         setDataStatus(`매칭됨 (#${rowIndex+1})`, "ok");
         setStatus("표시 완료", "ok");
 
-        const fee = String(row[FEE_COL] ?? '').trim();
+        const feeRaw = String(row[FEE_COL] ?? '').trim();
         const note = String(row[NOTE_COL] ?? '').trim();
         const ban  = String(row[BAN_COL] ?? '').trim();
 
-        // ✅ 카드형 렌더링
+        // ✅ 수수료를 % 숫자로 파싱 ( "3%", "3", " 3.5 % " 등 허용 )
+        const feePct = parsePercent(feeRaw); // 예: 3 => 0.03
+        const feePctLabel = (feePct != null) ? (formatPercent(feePct)) : (feeRaw || '-');
+
+        // ✅ KEY/도메인 칩은 숨기고 3개 섹션만 렌더
         document.getElementById('dataCard').innerHTML = `
           <div class="matchCard">
-            <div class="chipRow">
-              <span class="chip"><span class="dot"></span><strong>KEY</strong> ${escapeHtml(rawKey || '-')}</span>
-              <span class="chip"><span class="dot green"></span><strong>도메인</strong> ${escapeHtml(normKey || '-')}</span>
-            </div>
-
             <div class="kvGrid">
               <div class="kvItem">
                 <div class="kvTitle"><span class="dot green"></span> 수수료</div>
-                <div class="kvValue">${escapeHtml(fee || '-')}${fee ? '' : ''}</div>
+                <div class="kvValue">
+                  <div class="feeRow">
+                    <span class="feePill">수수료율: ${escapeHtml(feePctLabel || '-')}</span>
+                    <input class="feeInput" id="feeBaseInput" inputmode="numeric" placeholder="금액 입력 (예: 10000)" />
+                    <span class="feeHint">입력하면 자동 계산</span>
+                  </div>
+                  <div class="feeResult" id="feeResultText">수수료 금액: <span>-</span></div>
+                </div>
               </div>
 
               <div class="kvItem">
@@ -210,6 +185,9 @@
           </div>
         `;
 
+        // ✅ 입력 이벤트 연결 (렌더 후)
+        setupFeeCalculator(feePct, feePctLabel);
+
         setDebug(`data 시트 로드됨: rows=${dataRows.length}`);
 
       } catch (e) {
@@ -219,10 +197,40 @@
       }
     }
 
+    function setupFeeCalculator(feePct, feePctLabel) {
+      const input = document.getElementById('feeBaseInput');
+      const out = document.getElementById('feeResultText');
+
+      if (!input || !out) return;
+
+      const calc = () => {
+        const raw = String(input.value || '');
+        const base = parseNumber(raw);
+
+        // 수수료율 파싱 실패면 계산 불가
+        if (feePct == null) {
+          out.innerHTML = `수수료 금액: <span>-</span> <div class="feeHint">수수료율을 B열에 "3%"처럼 넣어주세요.</div>`;
+          return;
+        }
+
+        if (base == null) {
+          out.innerHTML = `수수료 금액: <span>-</span>`;
+          return;
+        }
+
+        const feeAmount = Math.round(base * feePct); // 원 단위 반올림(원하면 내림/올림으로 변경 가능)
+        out.innerHTML = `수수료 금액: <span>${formatNumber(feeAmount)}</span>`;
+      };
+
+      // 입력 즉시 반영
+      input.addEventListener('input', calc);
+      // 초기값 계산(빈 값이면 -)
+      calc();
+    }
+
     function getFromInfo() {
       const item = Office?.context?.mailbox?.item;
       if (!item) throw new Error("Office.context.mailbox.item 이 없습니다. (메일 읽기 화면에서 열어주세요)");
-
       const fromEmail = item?.from?.emailAddress || '';
       const fromDomain = normalizeToDomain(fromEmail);
       return { fromEmail, fromDomain };
@@ -288,7 +296,6 @@
       for (let i = 0; i < rows.length; i++) {
         const rawKey = String(rows[i][KEY_COL] ?? '');
         const keyDomain = normalizeToDomain(rawKey);
-
         if (!keyDomain) continue;
 
         if (keyDomain === d) {
@@ -299,7 +306,6 @@
           return { rowIndex: i, row: rows[i], rawKey, normKey: keyDomain };
         }
       }
-
       return null;
     }
 
@@ -342,6 +348,42 @@
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;");
+    }
+
+    // --- helpers: percent/number ---
+    function parsePercent(raw) {
+      if (raw == null) return null;
+      const s = String(raw).replace(/\s/g, '');
+      if (!s) return null;
+
+      // "3%" or "3" or "3.5%" 모두 허용
+      const cleaned = s.replace('%', '');
+      const n = Number(cleaned);
+      if (!isFinite(n)) return null;
+
+      // 3 => 0.03
+      return n / 100;
+    }
+
+    function formatPercent(p) {
+      // 0.03 => "3%"
+      const n = p * 100;
+      // 소수점 있으면 깔끔하게
+      const txt = (Math.round(n * 100) / 100).toString();
+      return `${txt}%`;
+    }
+
+    function parseNumber(raw) {
+      if (raw == null) return null;
+      const s = String(raw).replace(/[,\s]/g, '');
+      if (!s) return null;
+      const n = Number(s);
+      if (!isFinite(n)) return null;
+      return n;
+    }
+
+    function formatNumber(n) {
+      try { return n.toLocaleString('ko-KR'); } catch { return String(n); }
     }
   </script>
 </body>
