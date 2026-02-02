@@ -2,72 +2,134 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>거래처 도메인 조회</title>
+  <title>거래처 정보</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <style>
-    body { font-family: 'Segoe UI', sans-serif; padding: 15px; margin: 0; background: #fff; }
-    .header { color: #2b579a; font-size: 16px; font-weight: 700; border-bottom: 2px solid #2b579a; padding-bottom: 6px; margin-bottom: 12px; }
-    .box { border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
-    .row { margin: 6px 0; font-size: 13px; }
-    .label { color:#666; display:inline-block; width: 120px; }
-    .value { font-weight: 700; }
-    .ok { color: #0a7a0a; }
-    .warn { color: #b36b00; }
-    .err { color: #b00020; white-space: pre-wrap; font-size: 12px; line-height: 1.4; }
+    :root{
+      --brand:#2b579a;
+      --border:#e7e7e7;
+      --muted:#6b7280;
+      --bg:#ffffff;
+      --card:#ffffff;
+      --chip:#f7f7f8;
+    }
+    body { font-family: 'Segoe UI', sans-serif; padding: 14px; margin: 0; background: var(--bg); }
+    .header {
+      color: var(--brand);
+      font-size: 16px;
+      font-weight: 800;
+      border-bottom: 2px solid var(--brand);
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; border: 1px solid #e0e0e0; }
-    th { background-color: #f3f3f3; color: #333; font-weight: bold; padding: 8px; border: 1px solid #e0e0e0; text-align: left; }
-    td { padding: 8px; border: 1px solid #e0e0e0; color: #555; vertical-align: top; }
-    tr:nth-child(even) { background-color: #fafafa; }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      background: var(--card);
+      box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+      margin-bottom: 12px;
+    }
 
-    button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
-    .muted { color:#777; font-size:12px; white-space:pre-wrap; margin-top:8px; }
+    .row { display:flex; justify-content:space-between; gap:12px; margin: 6px 0; font-size: 13px; }
+    .label { color: var(--muted); min-width: 120px; }
+    .value { font-weight: 800; color:#111827; word-break: break-all; }
 
-    .calc { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
-    .calc input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; width: 160px; }
-    .pill { padding: 6px 10px; border-radius: 999px; border: 1px solid #e5e5e5; background: #fafafa; font-size: 12px; }
+    .status { display:inline-flex; align-items:center; gap:8px; font-size:12px; padding:6px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--chip); }
+    .dot { width:8px; height:8px; border-radius:999px; background:#9ca3af; }
+    .ok .dot{ background:#16a34a; }
+    .warn .dot{ background:#f59e0b; }
+
+    .grid {
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      margin-top: 6px;
+    }
+
+    .field {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+    .field .k { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+    .field .v { font-size: 14px; font-weight: 800; color:#111827; line-height: 1.3; white-space: pre-wrap; }
+
+    .feeWrap { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
+    .feeTop { display:flex; gap:10px; align-items:center; flex-wrap: wrap; }
+    .chip { font-size: 12px; padding: 6px 10px; border-radius:999px; border:1px solid var(--border); background: var(--chip); color:#111827; }
+    .input {
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 13px;
+      width: 160px;
+      outline: none;
+    }
+    .input:focus { border-color: rgba(43,87,154,0.5); box-shadow: 0 0 0 3px rgba(43,87,154,0.12); }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 8px; white-space: pre-wrap; }
+
+    button {
+      padding: 9px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fafafa;
+      cursor: pointer;
+      font-weight: 700;
+      width: 100%;
+    }
+
+    .error { color: #b00020; white-space: pre-wrap; font-size: 12px; line-height: 1.4; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <div class="header">📩 거래처 도메인 조회</div>
+  <div class="header">📌 거래처 정보</div>
 
-  <div class="box">
-    <div class="row"><span class="label">발신자 이메일</span> <span class="value" id="fromEmail">-</span></div>
-    <div class="row"><span class="label">발신자 도메인</span> <span class="value" id="fromDomain">-</span></div>
-    <div class="row"><span class="label">상태</span> <span class="value" id="statusText">대기중</span></div>
+  <div class="card">
+    <div class="row"><div class="label">발신자 이메일</div><div class="value" id="fromEmail">-</div></div>
+    <div class="row"><div class="label">발신자 도메인</div><div class="value" id="fromDomain">-</div></div>
+    <div style="margin-top:10px;">
+      <span class="status" id="statusPill"><span class="dot"></span><span id="statusText">대기중</span></span>
+    </div>
   </div>
 
-  <div class="box">
-    <div class="row"><span class="label">조회 결과</span> <span class="value" id="resultStatus">-</span></div>
-    <div id="resultTable"></div>
-
-    <div id="calcBox" style="display:none;">
-      <div class="calc">
-        <span class="pill" id="feePill">수수료: -</span>
-        <input id="amountInput" placeholder="금액 입력 (예: 10000)" inputmode="numeric" />
-        <span class="pill" id="resultPill">결과: -</span>
-      </div>
-      <div class="muted" id="calcHint"></div>
+  <div class="card">
+    <div class="row" style="align-items:center;">
+      <div class="label" style="font-weight:800;color:#111827;">조회 결과</div>
+      <div style="flex:1;"></div>
+      <span class="status" id="resultPill"><span class="dot"></span><span id="resultText">-</span></span>
     </div>
 
-    <div class="muted" id="debug"></div>
+    <div id="fields" class="grid"></div>
   </div>
 
   <button id="btnRefresh">새로고침</button>
-  <div class="err" id="error" style="margin-top:10px;"></div>
+  <div class="error" id="error"></div>
 
   <script>
     // ✅ 너의 Apps Script 웹앱 URL
     const SCRIPT_API_URL = "https://script.google.com/a/macros/tidesquare.com/s/AKfycbx_3xHGU585tXybxxTmF0o_RpNlyu2IXozPiaUTt0ZmedguG_goUAfmF3PzFit7ykL0/exec";
 
-    // ✅ 수수료 컬럼명 후보(시트 헤더가 뭐가 되든 자동 탐색)
-    const FEE_FIELD_CANDIDATES = ["수수료", "fee", "commission", "rate", "커미션"];
+    // ✅ 수수료 컬럼명 후보 (헤더가 무엇이든 자동 탐색)
+    const FEE_FIELD_CANDIDATES = ["수수료", "fee", "commission", "커미션", "rate"];
 
-    let currentFeeRate = null; // 0.03 같은 숫자
-    let currentRecord = null;
+    // ✅ 표시에서 제외할 컬럼(원하면 추가)
+    const HIDE_FIELDS = ["email", "이메일", "domain", "도메인"];
+
+    // ✅ "B열부터 보여주기" => record의 첫 번째 컬럼(A열, key) 항상 제외
+    // Apps Script 응답에서 headers/record가 오고, headers[0]이 A열이라고 가정.
+    const SKIP_FIRST_COLUMN = true;
+
+    let currentFeeRate = null;   // 0.03 같은 rate
+    let currentFeeText = null;   // "3%" 같은 표시 텍스트
 
     document.getElementById('btnRefresh').addEventListener('click', run);
-    document.getElementById('amountInput').addEventListener('input', onAmountChange);
 
     Office.onReady(() => {
       try {
@@ -80,11 +142,9 @@
 
     async function run() {
       clearError();
-      clearResult();
-      setDebug("");
-      hideCalc();
       setStatus("불러오는 중...", "warn");
-      setResultStatus("-");
+      setResult("-", "warn");
+      document.getElementById("fields").innerHTML = "";
 
       try {
         const { fromEmail, fromDomain } = getFromInfo();
@@ -97,47 +157,35 @@
         }
 
         const json = await callScriptJsonp(fromDomain);
-        setDebug("응답:\n" + JSON.stringify(json, null, 2));
 
         if (!json.allowed) {
-          setResultStatus("권한/등록 없음", "warn");
-          setStatus("domain 시트에 등록되지 않은 도메인입니다.", "warn");
+          setStatus("완료", "ok");
+          setResult("등록되지 않은 도메인", "warn");
           return;
         }
 
         if (json.matched === false) {
-          setResultStatus("등록됨 / data 매칭 없음", "warn");
-          setStatus("domain에는 있지만 data에는 매칭이 없습니다.", "warn");
+          setStatus("완료", "ok");
+          setResult("등록됨 / data 매칭 없음", "warn");
           return;
         }
 
         if (!json.record || typeof json.record !== "object") {
-          setResultStatus("응답 형식 오류", "warn");
-          setStatus("Apps Script 응답에 record가 없습니다.", "warn");
-          return;
+          setStatus("에러", "warn");
+          setResult("응답 형식 오류", "warn");
+          throw new Error("Apps Script 응답에 record가 없습니다.");
         }
 
-        currentRecord = json.record;
+        setStatus("완료", "ok");
+        setResult("매칭됨 ✅", "ok");
 
-        setResultStatus("매칭됨 ✅", "ok");
-        setStatus("표시 완료", "ok");
-
-        renderDynamicRecord(json.record);
-
-        // 수수료 찾기 + 계산 박스 활성화
-        const feeRaw = findFeeValue(json.record);
-        const feeRate = parsePercentToRate(feeRaw);
-        if (feeRate != null) {
-          currentFeeRate = feeRate;
-          showCalc(feeRaw, feeRate);
-          // 입력값 유지한 채 재계산
-          onAmountChange();
-        }
+        // ✅ 동적 필드 렌더 (B열부터)
+        renderFields(json);
 
       } catch (e) {
         console.error(e);
+        setStatus("에러", "warn");
         showError((e && e.message) ? e.message : String(e));
-        setStatus("에러 발생", "warn");
       }
     }
 
@@ -192,60 +240,115 @@
       });
     }
 
-    // ✅ record를 “동적” 항목/값 테이블로 렌더
-    function renderDynamicRecord(record) {
-      const entries = Object.entries(record);
+    function renderFields(json) {
+      const record = json.record;
+      const headers = Array.isArray(json.headers) ? json.headers : Object.keys(record);
 
-      const html = `
-        <table>
-          <thead><tr><th>항목</th><th>값</th></tr></thead>
-          <tbody>
-            ${entries.map(([k, v]) => `
-              <tr>
-                <td>${escapeHtml(k)}</td>
-                <td>${escapeHtml(formatValue(v))}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
+      // 표시할 키 목록 결정 (B열부터)
+      let keys = headers.filter(h => String(h || '').trim() !== "");
+      if (SKIP_FIRST_COLUMN && keys.length > 0) keys = keys.slice(1);
+
+      // 숨김 필드 제거
+      keys = keys.filter(k => !HIDE_FIELDS.map(x => x.toLowerCase()).includes(String(k).toLowerCase()));
+
+      // 수수료 컬럼 찾기
+      const feeKey = findFeeKey(record, keys);
+      const feeRaw = feeKey ? record[feeKey] : null;
+
+      // 수수료는 “3%” 형태로 보여주기
+      const feeRate = parsePercentToRate(feeRaw);
+      currentFeeRate = feeRate;
+      currentFeeText = feeRate != null ? formatRateAsPercentText(feeRaw, feeRate) : null;
+
+      // 필드 렌더
+      const container = document.getElementById("fields");
+      container.innerHTML = "";
+
+      for (const k of keys) {
+        const v = record[k];
+
+        // 수수료 항목은 계산기 포함해서 렌더
+        if (feeKey && String(k) === String(feeKey)) {
+          container.appendChild(renderFeeField(k, v, feeRate));
+          continue;
+        }
+
+        container.appendChild(renderPrettyField(k, v));
+      }
+    }
+
+    function renderPrettyField(key, value) {
+      const div = document.createElement("div");
+      div.className = "field";
+      div.innerHTML = `
+        <div class="k">${escapeHtml(key)}</div>
+        <div class="v">${escapeHtml(formatValue(value))}</div>
       `;
-      document.getElementById('resultTable').innerHTML = html;
+      return div;
     }
 
-    function formatValue(v) {
-      if (v == null) return "";
-      if (typeof v === "number") return String(v);
-      return String(v);
-    }
+    function renderFeeField(key, value, feeRate) {
+      const div = document.createElement("div");
+      div.className = "field";
 
-    // ✅ 수수료 컬럼 자동 찾기
-    function findFeeValue(record) {
-      // 1) 후보 키로 직접 탐색 (대소문자 무시)
-      const keys = Object.keys(record);
-      for (const cand of FEE_FIELD_CANDIDATES) {
-        const hit = keys.find(k => String(k).trim().toLowerCase() === cand.toLowerCase());
-        if (hit) return record[hit];
+      const feeText = feeRate != null ? formatRateAsPercentText(value, feeRate) : formatValue(value);
+
+      div.innerHTML = `
+        <div class="k">${escapeHtml(key)}</div>
+        <div class="v">${escapeHtml(feeText)}</div>
+        <div class="feeWrap" id="feeWrap">
+          <div class="feeTop">
+            <span class="chip" id="feeChip">수수료: ${escapeHtml(feeText)}</span>
+            <input class="input" id="amountInput" placeholder="금액 입력 (예: 10000)" inputmode="numeric" />
+            <span class="chip" id="resultChip">결과: -</span>
+          </div>
+          <div class="hint" id="feeHint">금액을 입력하면 수수료 금액을 자동 계산합니다.</div>
+        </div>
+      `;
+
+      // feeRate 없으면 계산기 숨김
+      if (feeRate == null) {
+        div.querySelector("#feeWrap").style.display = "none";
+        return div;
       }
 
-      // 2) 키에 "수수료/fee/commission" 포함하면 그것도 허용
-      const loose = keys.find(k => {
-        const kk = String(k).trim().toLowerCase();
-        return kk.includes("수수료") || kk.includes("fee") || kk.includes("commission") || kk.includes("커미션");
-      });
-      if (loose) return record[loose];
+      const amountInput = div.querySelector("#amountInput");
+      const resultChip = div.querySelector("#resultChip");
 
-      return null;
+      amountInput.addEventListener("input", () => {
+        const amount = parseMoney(amountInput.value);
+        if (amount == null) {
+          resultChip.textContent = "결과: -";
+          return;
+        }
+        const feeAmount = Math.round(amount * feeRate);
+        resultChip.textContent = `결과: ${formatMoney(feeAmount)} ( ${formatMoney(amount)} × ${formatRateNumber(feeRate)}% )`;
+      });
+
+      return div;
     }
 
-    // "3%" / "0.03" / "3" -> 0.03 로 변환
+    function findFeeKey(record, keys) {
+      const keyLower = keys.map(k => [k, String(k).trim().toLowerCase()]);
+      // 정확히 일치 우선
+      for (const cand of FEE_FIELD_CANDIDATES) {
+        const c = cand.toLowerCase();
+        const hit = keyLower.find(([k, kl]) => kl === c);
+        if (hit) return hit[0];
+      }
+      // 포함 매칭
+      const loose = keyLower.find(([k, kl]) =>
+        kl.includes("수수료") || kl.includes("fee") || kl.includes("commission") || kl.includes("커미션")
+      );
+      return loose ? loose[0] : null;
+    }
+
+    // "3%" / "0.03" / "3" -> 0.03
     function parsePercentToRate(value) {
       if (value == null) return null;
-
       let s = String(value).trim();
-
       if (!s) return null;
 
-      // "3%" 형태
       if (s.includes("%")) {
         s = s.replace("%", "").trim();
         const n = Number(s.replace(/,/g, ""));
@@ -253,48 +356,35 @@
         return null;
       }
 
-      // 숫자
       const n = Number(s.replace(/,/g, ""));
       if (!Number.isFinite(n)) return null;
 
-      // 0.03 처럼 1 이하이면 이미 rate로 판단
-      if (n <= 1) return n;
-
-      // 3 처럼 1 초과이면 퍼센트로 판단
-      return n / 100;
+      if (n <= 1) return n;   // 0.03
+      return n / 100;         // 3 -> 0.03
     }
 
-    function showCalc(feeRaw, feeRate) {
-      document.getElementById("calcBox").style.display = "block";
-      document.getElementById("feePill").textContent = `수수료: ${feeRaw} (rate=${feeRate})`;
-      document.getElementById("calcHint").textContent = "금액을 입력하면 수수료 금액을 자동 계산합니다.";
-      currentFeeRate = feeRate;
+    // 표시 텍스트는 항상 "3%" 형태로
+    function formatRateAsPercentText(raw, rate) {
+      // raw가 "3%"면 그대로
+      const s = raw == null ? "" : String(raw).trim();
+      if (s.includes("%")) return s.replace(/\s+/g, "");
+
+      // 숫자면 rate로 계산해서 2자리까지 예쁘게
+      const pct = rate * 100;
+      // 3.00%면 "3%"로 깔끔하게
+      const fixed = (Math.round(pct * 100) / 100);
+      const pretty = (fixed % 1 === 0) ? String(fixed.toFixed(0)) : String(fixed);
+      return `${pretty}%`;
     }
 
-    function hideCalc() {
-      document.getElementById("calcBox").style.display = "none";
-      currentFeeRate = null;
-      document.getElementById("feePill").textContent = "수수료: -";
-      document.getElementById("resultPill").textContent = "결과: -";
-      document.getElementById("calcHint").textContent = "";
-    }
-
-    function onAmountChange() {
-      const input = document.getElementById("amountInput").value || "";
-      const amount = parseMoney(input);
-
-      if (currentFeeRate == null || amount == null) {
-        document.getElementById("resultPill").textContent = "결과: -";
-        return;
-      }
-
-      const feeAmount = Math.round(amount * currentFeeRate);
-      document.getElementById("resultPill").textContent =
-        `결과: ${formatMoney(feeAmount)} (입력 ${formatMoney(amount)} × ${(currentFeeRate*100).toFixed(2)}%)`;
+    function formatRateNumber(rate) {
+      const pct = rate * 100;
+      const fixed = (Math.round(pct * 100) / 100);
+      return (fixed % 1 === 0) ? fixed.toFixed(0) : String(fixed);
     }
 
     function parseMoney(text) {
-      const s = String(text).trim();
+      const s = String(text || "").trim();
       if (!s) return null;
       const n = Number(s.replace(/,/g, ""));
       if (!Number.isFinite(n)) return null;
@@ -306,34 +396,34 @@
       catch { return String(n); }
     }
 
+    function formatValue(v) {
+      if (v == null) return "";
+      // 숫자인데 0.03 같은 값은 그냥 숫자로 보여줄 수 있으니(수수료는 따로 처리)
+      return String(v);
+    }
+
     function setStatus(text, tone) {
-      const el = document.getElementById('statusText');
-      el.textContent = text;
-      el.classList.remove('ok', 'warn');
-      if (tone) el.classList.add(tone);
+      const pill = document.getElementById("statusPill");
+      const t = document.getElementById("statusText");
+      t.textContent = text;
+      pill.classList.remove("ok", "warn");
+      pill.classList.add(tone === "ok" ? "ok" : "warn");
     }
 
-    function setResultStatus(text, tone) {
-      const el = document.getElementById('resultStatus');
-      el.textContent = text;
-      el.classList.remove('ok', 'warn');
-      if (tone) el.classList.add(tone);
-    }
-
-    function clearResult() {
-      document.getElementById('resultTable').innerHTML = '';
-    }
-
-    function setDebug(text) {
-      document.getElementById('debug').textContent = text || '';
+    function setResult(text, tone) {
+      const pill = document.getElementById("resultPill");
+      const t = document.getElementById("resultText");
+      t.textContent = text;
+      pill.classList.remove("ok", "warn");
+      pill.classList.add(tone === "ok" ? "ok" : "warn");
     }
 
     function showError(msg) {
-      document.getElementById('error').textContent = msg;
+      document.getElementById("error").textContent = msg;
     }
 
     function clearError() {
-      document.getElementById('error').textContent = '';
+      document.getElementById("error").textContent = "";
     }
 
     function escapeHtml(s) {
