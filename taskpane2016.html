@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <!-- Outlook 2016(IE WebView) 호환 -->
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>거래처 정보</title>
+
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+
+  <style>
+    /* ✅ CSS 변수(:root) 제거 -> IE11에서도 안정적으로 보이게 */
+    body { font-family: "Segoe UI", Arial, sans-serif; padding: 14px; margin: 0; background: #ffffff; }
+
+    .header {
+      color: #2b579a;
+      font-size: 16px;
+      font-weight: 800;
+      border-bottom: 2px solid #2b579a;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+      /* flex는 IE11 가능, gap은 불안정 -> margin으로 대체 */
+      display: -ms-flexbox;
+      display: flex;
+      -ms-flex-align: center;
+      align-items: center;
+    }
+    .header .ico { margin-right: 8px; }
+
+    .sub { color: #6b7280; font-size: 12px; margin-top: 2px; }
+
+    .card {
+      border: 1px solid #e7e7e7;
+      border-radius: 14px;
+      padding: 12px;
+      background: #ffffff;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+      margin-bottom: 12px;
+    }
+
+    .row {
+      display: -ms-flexbox;
+      display: flex;
+      -ms-flex-pack: justify;
+      justify-content: space-between;
+      margin: 6px 0;
+      font-size: 13px;
+    }
+    .label { color: #6b7280; min-width: 120px; }
+    .value { font-weight: 800; color: #111827; word-break: break-all; }
+
+    .status {
+      display: inline-block;
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid #e7e7e7;
+      background: #f7f7f8;
+      color: #111827;
+    }
+    .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #9ca3af;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .okDot { background: #16a34a !important; }
+    .warnDot { background: #f59e0b !important; }
+
+    .grid { margin-top: 6px; }
+    .field {
+      border: 1px solid #e7e7e7;
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #ffffff;
+      margin-bottom: 10px;
+    }
+    .field .k { color: #6b7280; font-size: 12px; margin-bottom: 6px; }
+    .field .v { font-size: 12px; font-weight: 800; color: #111827; line-height: 1.4; white-space: pre-wrap; }
+
+    .feeWrap { margin-top: 10px; border-top: 1px dashed #e7e7e7; padding-top: 10px; }
+    .feeTop { }
+    .chip {
+      display: inline-block;
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid #e7e7e7;
+      background: #f7f7f8;
+      color: #111827;
+      margin-right: 8px;
+      margin-bottom: 8px;
+    }
+    .input {
+      padding: 9px 10px;
+      border: 1px solid #e7e7e7;
+      border-radius: 10px;
+      font-size: 13px;
+      width: 160px;
+      outline: none;
+      margin-right: 8px;
+      margin-bottom: 8px;
+    }
+    .input:focus {
+      border-color: rgba(43,87,154,0.5);
+      box-shadow: 0 0 0 3px rgba(43,87,154,0.12);
+    }
+
+    button {
+      padding: 9px 12px;
+      border-radius: 10px;
+      border: 1px solid #e7e7e7;
+      background: #fafafa;
+      cursor: pointer;
+      font-weight: 700;
+      width: 100%;
+    }
+
+    .error { color: #b00020; white-space: pre-wrap; font-size: 12px; line-height: 1.4; margin-top: 10px; }
+  </style>
+</head>
+
+<body>
+  <div class="header"><span class="ico">📌</span>거래처 정보</div>
+
+  <div class="card">
+    <div class="row"><div class="label">발신자 이메일</div><div class="value" id="fromEmail">-</div></div>
+    <div class="row"><div class="label">발신자 도메인</div><div class="value" id="fromDomain">-</div></div>
+    <div style="margin-top:10px;">
+      <span class="status" id="statusPill"><span class="dot" id="statusDot"></span><span id="statusText">대기중</span></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="align-items:center;">
+      <div class="label" style="font-weight:800;color:#111827;">조회 결과</div>
+      <div style="flex:1;"></div>
+      <span class="status" id="resultPill"><span class="dot" id="resultDot"></span><span id="resultText">-</span></span>
+    </div>
+
+    <div id="fields" class="grid"></div>
+  </div>
+
+  <button id="btnRefresh">새로고침</button>
+  <div class="error" id="error"></div>
+
+  <script>
+    /* =========================
+       ✅ Outlook 2016 호환 패치
+       - ES5만 사용(IE11 기준)
+       - async/await, Promise, const/let, for..of, template literal, replaceAll 제거
+       - optional chaining 제거
+       - JSONP는 콜백 방식
+    ========================= */
+
+    // ✅ 너의 Apps Script 웹앱 URL
+    var SCRIPT_API_URL = "https://script.google.com/macros/s/AKfycbx_3xHGU585tXybxxTmF0o_RpNlyu2IXozPiaUTt0ZmedguG_goUAfmF3PzFit7ykL0/exec";
+
+    // ✅ 수수료 컬럼명 후보
+    var FEE_FIELD_CANDIDATES = ["수수료", "fee", "commission", "커미션", "rate"];
+
+    // ✅ 표시에서 제외할 컬럼
+    var HIDE_FIELDS = ["email", "이메일", "domain", "도메인"];
+
+    // ✅ "B열부터 보여주기"
+    var SKIP_FIRST_COLUMN = true;
+
+    var currentFeeRate = null;   // 0.03 같은 rate
+    var currentFeeText = null;   // "3%" 같은 표시 텍스트
+
+    var btn = document.getElementById("btnRefresh");
+    if (btn) btn.onclick = function () { run(); };
+
+    // Office.onReady가 없는 구버전 대비 (Office.initialize)
+    function boot() {
+      try {
+        // ItemChanged가 지원되는 경우만
+        if (Office && Office.context && Office.context.mailbox && Office.context.mailbox.addHandlerAsync) {
+          try {
+            Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, function () { run(); });
+          } catch (e1) {
+            // Outlook 2016 일부 환경에서 실패할 수 있음
+            // console은 남겨도 됨
+            try { console.error("ItemChanged handler failed:", e1); } catch (ignore1) {}
+          }
+        }
+      } catch (e2) {}
+
+      run();
+    }
+
+    if (typeof Office !== "undefined") {
+      if (Office.onReady) {
+        Office.onReady(function () { boot(); });
+      } else {
+        Office.initialize = function () { boot(); };
+      }
+    } else {
+      // office.js가 늦게 로드되는 경우를 대비
+      setTimeout(function () {
+        try { boot(); } catch (e3) {}
+      }, 500);
+    }
+
+    function run() {
+      clearError();
+      setStatus("불러오는 중...", "warn");
+      setResult("-", "warn");
+      var fields = document.getElementById("fields");
+      if (fields) fields.innerHTML = "";
+
+      var fromInfo;
+      try {
+        fromInfo = getFromInfo();
+      } catch (e0) {
+        setStatus("에러", "warn");
+        showError((e0 && e0.message) ? e0.message : String(e0));
+        return;
+      }
+
+      var fromEmail = fromInfo.fromEmail;
+      var fromDomain = fromInfo.fromDomain;
+
+      document.getElementById("fromEmail").innerHTML = escapeHtml(fromEmail || "(없음)");
+      document.getElementById("fromDomain").innerHTML = escapeHtml(fromDomain || "(없음)");
+
+      if (!fromDomain) {
+        setStatus("발신자 도메인을 읽지 못했습니다.", "warn");
+        return;
+      }
+
+      // ✅ JSONP 콜백 방식 (Promise 제거)
+      callScriptJsonp(fromDomain,
+        function (json) {
+          try {
+            handleJson(json);
+          } catch (e1) {
+            setStatus("에러", "warn");
+            setResult("응답 처리 오류", "warn");
+            showError((e1 && e1.message) ? e1.message : String(e1));
+          }
+        },
+        function (err) {
+          setStatus("에러", "warn");
+          showError((err && err.message) ? err.message : String(err));
+        }
+      );
+    }
+
+    function handleJson(json) {
+      if (!json || typeof json !== "object") {
+        setStatus("에러", "warn");
+        setResult("응답 형식 오류", "warn");
+        throw new Error("Apps Script 응답이 비정상입니다.");
+      }
+
+      if (!json.allowed) {
+        setStatus("완료", "ok");
+        setResult("등록되지 않은 도메인", "warn");
+        return;
+      }
+
+      if (json.matched === false) {
+        setStatus("완료", "ok");
+        setResult("등록됨 / data 매칭 없음", "warn");
+        return;
+      }
+
+      if (!json.record || typeof json.record !== "object") {
+        setStatus("에러", "warn");
+        setResult("응답 형식 오류", "warn");
+        throw new Error("Apps Script 응답에 record가 없습니다.");
+      }
+
+      setStatus("완료", "ok");
+      setResult("매칭됨 ✅", "ok");
+
+      renderFields(json);
+    }
+
+    function getFromInfo() {
+      var item = null;
+      try {
+        if (Office && Office.context && Office.context.mailbox) {
+          item = Office.context.mailbox.item;
+        }
+      } catch (e) {}
+
+      if (!item) throw new Error("Office.context.mailbox.item 이 없습니다. (메일 읽기 화면에서 열어주세요)");
+
+      var fromEmail = "";
+      try {
+        if (item.from && item.from.emailAddress) fromEmail = item.from.emailAddress;
+      } catch (e2) {}
+
+      var fromDomain = normalizeToDomain(fromEmail);
+      return { fromEmail: fromEmail, fromDomain: fromDomain };
+    }
+
+    function normalizeToDomain(value) {
+      if (value == null) return "";
+      var s = String(value);
+      s = s.replace(/\u00A0/g, " ").replace(/^\s+|\s+$/g, "").toLowerCase();
+      s = s.replace(/^https?:\/\//, "");
+      s = s.replace(/,.*$/, "");
+      s = s.replace(/\/.*$/, "");
+      s = s.replace(/^[.@]+/, "");
+      if (s.indexOf("@") >= 0) s = s.slice(s.lastIndexOf("@") + 1).replace(/^\s+|\s+$/g, "");
+      return s;
+    }
+
+    // ✅ JSONP 호출 (콜백 방식)
+    function callScriptJsonp(domain, onSuccess, onError) {
+      var cbName = "cb_" + Math.random().toString(36).slice(2);
+      var done = false;
+
+      var timeout = setTimeout(function () {
+        cleanup();
+        if (!done) {
+          done = true;
+          onError(new Error("Apps Script JSONP timeout"));
+        }
+      }, 12000);
+
+      window[cbName] = function (data) {
+        if (done) return;
+        done = true;
+        cleanup();
+        onSuccess(data);
+      };
+
+      var url =
+        SCRIPT_API_URL +
+        "?domain=" + encodeURIComponent(domain) +
+        "&callback=" + encodeURIComponent(cbName) +
+        "&_ts=" + (new Date().getTime());
+
+      var script = document.createElement("script");
+      script.src = url;
+      script.async = true;
+
+      script.onerror = function () {
+        cleanup();
+        if (!done) {
+          done = true;
+          onError(new Error("Apps Script JSONP load failed"));
+        }
+      };
+
+      document.getElementsByTagName("head")[0].appendChild(script);
+
+      function cleanup() {
+        clearTimeout(timeout);
+        try { window[cbName] = null; delete window[cbName]; } catch (e1) {}
+        try { if (script && script.parentNode) script.parentNode.removeChild(script); } catch (e2) {}
+      }
+    }
+
+    function renderFields(json) {
+      var record = json.record;
+
+      // headers 우선, 없으면 record의 키를 대충 사용
+      var headers = [];
+      if (json.headers && Object.prototype.toString.call(json.headers) === "[object Array]") {
+        headers = json.headers;
+      } else {
+        // Object.keys는 IE11 가능하지만 안전하게 for..in 사용
+        for (var kk in record) {
+          if (record.hasOwnProperty(kk)) headers.push(kk);
+        }
+      }
+
+      // 표시할 키 목록 결정 (B열부터)
+      var keys = [];
+      for (var i = 0; i < headers.length; i++) {
+        var h = headers[i];
+        var hs = String(h || "").replace(/^\s+|\s+$/g, "");
+        if (hs !== "") keys.push(h);
+      }
+      if (SKIP_FIRST_COLUMN && keys.length > 0) keys = keys.slice(1);
+
+      // 숨김 필드 제거
+      var hideLower = [];
+      for (var j = 0; j < HIDE_FIELDS.length; j++) hideLower.push(String(HIDE_FIELDS[j]).toLowerCase());
+
+      var filtered = [];
+      for (var k = 0; k < keys.length; k++) {
+        var key = keys[k];
+        var kl = String(key).toLowerCase();
+        if (indexOfArray(hideLower, kl) === -1) filtered.push(key);
+      }
+      keys = filtered;
+
+      // 수수료 컬럼 찾기
+      var feeKey = findFeeKey(record, keys);
+      var feeRaw = feeKey ? record[feeKey] : null;
+
+      // 수수료 표시/계산용
+      var feeRate = parsePercentToRate(feeRaw);
+      currentFeeRate = feeRate;
+      currentFeeText = (feeRate != null) ? formatRateAsPercentText(feeRaw, feeRate) : null;
+
+      // 렌더
+      var container = document.getElementById("fields");
+      container.innerHTML = "";
+
+      for (var x = 0; x < keys.length; x++) {
+        var key2 = keys[x];
+        var v = record[key2];
+
+        if (feeKey && String(key2) === String(feeKey)) {
+          container.appendChild(renderFeeField(key2, v, feeRate));
+        } else {
+          container.appendChild(renderPrettyField(key2, v));
+        }
+      }
+    }
+
+    function renderPrettyField(key, value) {
+      var div = document.createElement("div");
+      div.className = "field";
+      div.innerHTML =
+        '<div class="k">' + escapeHtml(key) + '</div>' +
+        '<div class="v">' + escapeHtml(formatValue(value)) + '</div>';
+      return div;
+    }
+
+    function renderFeeField(key, value, feeRate) {
+      var div = document.createElement("div");
+      div.className = "field";
+
+      var feeText = (feeRate != null) ? formatRateAsPercentText(value, feeRate) : formatValue(value);
+
+      div.innerHTML =
+        '<div class="k">' + escapeHtml(key) + '</div>' +
+        '<div class="v">' + escapeHtml(feeText) + '</div>' +
+        '<div class="feeWrap" id="feeWrap">' +
+          '<div class="feeTop">' +
+            '<span class="chip" id="feeChip">수수료: ' + escapeHtml(feeText) + '</span>' +
+            '<input class="input" id="amountInput" placeholder="금액 입력 (예: 10000)" />' +
+            '<span class="chip" id="resultChip">결과: -</span>' +
+          '</div>' +
+        '</div>';
+
+      if (feeRate == null) {
+        // 계산기 숨김
+        try { div.querySelector("#feeWrap").style.display = "none"; } catch (e) {}
+        return div;
+      }
+
+      var amountInput = div.querySelector("#amountInput");
+      var resultChip = div.querySelector("#resultChip");
+
+      amountInput.oninput = function () {
+        var amount = parseMoney(amountInput.value);
+        if (amount == null) {
+          resultChip.innerHTML = "결과: -";
+          return;
+        }
+        var feeAmount = Math.round(amount * feeRate);
+        resultChip.innerHTML =
+          "결과: " + escapeHtml(formatMoney(feeAmount)) +
+          " ( " + escapeHtml(formatMoney(amount)) + " × " + escapeHtml(formatRateNumber(feeRate)) + "% )";
+      };
+
+      return div;
+    }
+
+    function findFeeKey(record, keys) {
+      // 정확히 일치 우선
+      for (var i = 0; i < FEE_FIELD_CANDIDATES.length; i++) {
+        var cand = String(FEE_FIELD_CANDIDATES[i]).toLowerCase();
+        for (var j = 0; j < keys.length; j++) {
+          var k = keys[j];
+          var kl = String(k).replace(/^\s+|\s+$/g, "").toLowerCase();
+          if (kl === cand) return k;
+        }
+      }
+
+      // 포함 매칭
+      for (var x = 0; x < keys.length; x++) {
+        var kk = keys[x];
+        var kll = String(kk).toLowerCase();
+        if (kll.indexOf("수수료") >= 0 || kll.indexOf("fee") >= 0 || kll.indexOf("commission") >= 0 || kll.indexOf("커미션") >= 0) {
+          return kk;
+        }
+      }
+
+      return null;
+    }
+
+    // "3%" / "0.03" / "3" -> 0.03
+    function parsePercentToRate(value) {
+      if (value == null) return null;
+      var s = String(value).replace(/^\s+|\s+$/g, "");
+      if (!s) return null;
+
+      if (s.indexOf("%") >= 0) {
+        s = s.replace("%", "").replace(/^\s+|\s+$/g, "");
+        var n1 = Number(s.replace(/,/g, ""));
+        if (isFiniteNumber(n1)) return n1 / 100;
+        return null;
+      }
+
+      var n = Number(s.replace(/,/g, ""));
+      if (!isFiniteNumber(n)) return null;
+
+      if (n <= 1) return n;   // 0.03
+      return n / 100;         // 3 -> 0.03
+    }
+
+    // 표시 텍스트는 항상 "3%" 형태로
+    function formatRateAsPercentText(raw, rate) {
+      var s = (raw == null) ? "" : String(raw).replace(/^\s+|\s+$/g, "");
+      if (s.indexOf("%") >= 0) return s.replace(/\s+/g, "");
+
+      var pct = rate * 100;
+      var fixed = (Math.round(pct * 100) / 100);
+      var pretty = (fixed % 1 === 0) ? String(fixed.toFixed(0)) : String(fixed);
+      return pretty + "%";
+    }
+
+    function formatRateNumber(rate) {
+      var pct = rate * 100;
+      var fixed = (Math.round(pct * 100) / 100);
+      return (fixed % 1 === 0) ? fixed.toFixed(0) : String(fixed);
+    }
+
+    function parseMoney(text) {
+      var s = String(text || "").replace(/^\s+|\s+$/g, "");
+      if (!s) return null;
+      var n = Number(s.replace(/,/g, ""));
+      if (!isFiniteNumber(n)) return null;
+      return n;
+    }
+
+    function formatMoney(n) {
+      try {
+        // IE11도 toLocaleString 동작하지만, 환경에 따라 예외 가능
+        return Number(n).toLocaleString("ko-KR");
+      } catch (e) {
+        return String(n);
+      }
+    }
+
+    function formatValue(v) {
+      if (v == null) return "";
+      return String(v);
+    }
+
+    function setStatus(text, tone) {
+      var t = document.getElementById("statusText");
+      var dot = document.getElementById("statusDot");
+      if (t) t.innerHTML = escapeHtml(text);
+
+      if (dot) {
+        dot.className = "dot " + (tone === "ok" ? "okDot" : "warnDot");
+      }
+    }
+
+    function setResult(text, tone) {
+      var t = document.getElementById("resultText");
+      var dot = document.getElementById("resultDot");
+      if (t) t.innerHTML = escapeHtml(text);
+
+      if (dot) {
+        dot.className = "dot " + (tone === "ok" ? "okDot" : "warnDot");
+      }
+    }
+
+    function showError(msg) {
+      var el = document.getElementById("error");
+      if (el) el.innerHTML = escapeHtml(msg);
+    }
+
+    function clearError() {
+      var el = document.getElementById("error");
+      if (el) el.innerHTML = "";
+    }
+
+    function escapeHtml(s) {
+      var str = String(s);
+      // replaceAll 대신 정규식
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function isFiniteNumber(n) {
+      return typeof n === "number" && isFinite(n);
+    }
+
+    function indexOfArray(arr, value) {
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i] === value) return i;
+      }
+      return -1;
+    }
+  </script>
+</body>
+</html>
