@@ -251,16 +251,47 @@
       margin-bottom: 8px;
     }
 
-    .quote-block-title {
+    /* 견적 블록: 태스크창이 좁아도 버튼이 잘리지 않도록 세로 배치 + 전체 너비 */
+    .quote-block-head {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      margin-top: 12px;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px dashed var(--border);
+    }
+
+    .quote-block-head:first-child {
+      margin-top: 0;
+    }
+
+    .quote-block-head .quote-block-title-text {
       font-size: 12px;
       font-weight: 800;
       color: var(--brand);
-      margin-top: 14px;
-      margin-bottom: 6px;
+      line-height: 1.3;
     }
 
-    .quote-block-title:first-child {
-      margin-top: 0;
+    button.quote-reply-btn {
+      display: block;
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 100%;
+      padding: 10px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      margin: 0;
+      color: var(--brand);
+      background: #f0f4fa;
+      border: 1px solid rgba(43, 87, 154, 0.45);
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    button.quote-reply-btn:hover {
+      background: #e2e9f5;
     }
   </style>
 </head>
@@ -469,11 +500,29 @@
 
     const MAX_QUOTE_BODY_SEND = 500;
 
+    /** 전체 회신 시 사용할 최근 견적 배열 (renderQuoteCriteria에서 갱신) */
+    let cachedQuotesForReply = null;
+
+    (function attachQuoteReplyClick() {
+      const fields = document.getElementById("quoteCriteriaFields");
+      if (!fields) return;
+      fields.addEventListener("click", (e) => {
+        const t = e.target;
+        const btn = t && typeof t.closest === "function" ? t.closest(".quote-reply-btn") : null;
+        if (!btn) return;
+        e.preventDefault();
+        const idx = parseInt(btn.getAttribute("data-quote-index"), 10);
+        if (Number.isNaN(idx)) return;
+        replyAllWithQuoteBody(idx);
+      });
+    })();
+
     function hideQuoteCriteria() {
       const wrap = document.getElementById("quoteCriteriaWrap");
       const fields = document.getElementById("quoteCriteriaFields");
       wrap.style.display = "none";
       fields.innerHTML = "";
+      cachedQuotesForReply = null;
     }
 
     /** 빈 값은 UI에서 Null (대문자 N) */
@@ -497,6 +546,58 @@
       ].join(" / ");
     }
 
+    function buildQuoteReplyPlainText(quoteIndex) {
+      const q = cachedQuotesForReply?.[quoteIndex];
+      if (!q) return "";
+      const lines = [];
+      lines.push(`견적 ${quoteIndex + 1}`);
+      lines.push("");
+      lines.push("출발지 / 출발일 / 출발시간 / 도착시간 / 항공사");
+      lines.push("");
+      const journeys = Array.isArray(q.journeys) ? q.journeys : [];
+      if (journeys.length === 0) {
+        lines.push(`여정1: ${journeyLine({})}`);
+      } else {
+        journeys.forEach((j, ji) => {
+          lines.push(`여정${ji + 1}: ${journeyLine(j)}`);
+        });
+      }
+      return lines.join("\n");
+    }
+
+    function nl2brHtml(text) {
+      return escapeHtml(text).replaceAll("\n", "<br>");
+    }
+
+    function replyAllWithQuoteBody(quoteIndex) {
+      const aiErr = document.getElementById("quoteAiError");
+      aiErr.textContent = "";
+
+      const item = Office?.context?.mailbox?.item;
+      if (!item) {
+        aiErr.textContent = "메일 읽기 화면에서만 전체 회신을 사용할 수 있습니다.";
+        return;
+      }
+      if (typeof item.displayReplyAllFormAsync !== "function") {
+        aiErr.textContent = "이 Outlook 환경에서는 전체 회신 창을 열 수 없습니다. (데스크톱 또는 Outlook 웹 최신 버전을 사용해 보세요.)";
+        return;
+      }
+
+      const plain = buildQuoteReplyPlainText(quoteIndex);
+      if (!plain) {
+        aiErr.textContent = "회신할 견적 데이터가 없습니다. 본문을 다시 불러오세요.";
+        return;
+      }
+
+      const htmlBody = `<div style="font-family:'Segoe UI',sans-serif;font-size:12px;line-height:1.5;">${nl2brHtml(plain)}</div>`;
+
+      item.displayReplyAllFormAsync({ htmlBody }, (result) => {
+        if (result.status !== Office.AsyncResultStatus.Succeeded) {
+          aiErr.textContent = result.error?.message || "전체 회신 창을 열 수 없습니다.";
+        }
+      });
+    }
+
     /**
      * quotes: [ { journeys: [ { departure, departureDate, departureTime, arrivalTime, airline } ] }, ... ]
      */
@@ -506,7 +607,10 @@
       container.innerHTML = "";
 
       const list = Array.isArray(quotes) ? quotes : [];
+      cachedQuotesForReply = JSON.parse(JSON.stringify(list));
+
       if (list.length === 0) {
+        cachedQuotesForReply = null;
         const div = document.createElement("div");
         div.className = "field";
         div.innerHTML = `<div class="k">안내</div><div class="v">추출된 견적이 없습니다.</div>`;
@@ -516,10 +620,19 @@
       }
 
       list.forEach((quote, qi) => {
-        const title = document.createElement("div");
-        title.className = "quote-block-title";
-        title.textContent = `견적 ${qi + 1}`;
-        container.appendChild(title);
+        const head = document.createElement("div");
+        head.className = "quote-block-head";
+        const titleText = document.createElement("span");
+        titleText.className = "quote-block-title-text";
+        titleText.textContent = `견적 ${qi + 1}`;
+        const replyBtn = document.createElement("button");
+        replyBtn.type = "button";
+        replyBtn.className = "quote-reply-btn";
+        replyBtn.setAttribute("data-quote-index", String(qi));
+        replyBtn.textContent = "전체 회신";
+        head.appendChild(titleText);
+        head.appendChild(replyBtn);
+        container.appendChild(head);
 
         const journeys = Array.isArray(quote?.journeys) ? quote.journeys : [];
         if (journeys.length === 0) {
