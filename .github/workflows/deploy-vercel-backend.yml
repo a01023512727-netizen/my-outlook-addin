@@ -1,0 +1,43 @@
+# backend/ 폴더를 Vercel 프로덕션에 배포합니다.
+# GitHub 저장소 → Settings → Secrets and variables → Actions 에 다음을 추가하세요:
+#   VERCEL_TOKEN        (Vercel → Settings → Tokens)
+#   VERCEL_ORG_ID       (team_.* 또는 user id — 아래 참고)
+#   VERCEL_PROJECT_ID   (prj_*)
+#
+# 프로젝트는 Vercel 대시보드에서 이 GitHub repo를 import하고 Root Directory를 backend 로 두면 됩니다.
+# 로컬에서 backend 폴더에서 npx vercel link 실행 후 .vercel/project.json 에 orgId, projectId 가 있습니다.
+
+name: Deploy backend to Vercel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-vercel-backend.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Pull Vercel environment
+        working-directory: backend
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        working-directory: backend
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy
+        working-directory: backend
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
