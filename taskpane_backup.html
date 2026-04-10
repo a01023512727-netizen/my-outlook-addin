@@ -237,6 +237,19 @@
       color: var(--muted);
       margin-top: 6px;
     }
+
+    .quote-criteria-wrap {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--border);
+    }
+
+    .quote-criteria-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #111827;
+      margin-bottom: 8px;
+    }
   </style>
 </head>
 <body>
@@ -285,8 +298,12 @@
           <div style="flex:1;"></div>
           <span class="status" id="quoteAiPill"><span class="dot"></span><span id="quoteAiStatusText">대기</span></span>
         </div>
-        <p class="quote-ai-meta">본문 앞부분 최대 500자만 서버로 보내 판단합니다. (OpenAI, 키는 Vercel 환경 변수)</p>
+        <p class="quote-ai-meta">본문 앞부분 최대 500자만 서버로 보내 견적 여부 판단 및 검색 조건을 추출합니다. (OpenAI, 키는 Vercel 환경 변수)</p>
         <div class="quote-ai-verdict" id="quoteAiVerdict">—</div>
+        <div class="quote-criteria-wrap" id="quoteCriteriaWrap" style="display: none;">
+          <div class="quote-criteria-title">항공권 검색 조건</div>
+          <div id="quoteCriteriaFields" class="grid"></div>
+        </div>
         <div class="error" id="quoteAiError"></div>
       </div>
       <div class="error" id="quoteError"></div>
@@ -387,6 +404,7 @@
 
       errEl.textContent = "";
       document.getElementById("quoteAiError").textContent = "";
+      hideQuoteCriteria();
       setQuoteAiRow("대기", "warn", "—");
       setQuoteStatus("불러오는 중...", "warn");
 
@@ -395,6 +413,7 @@
         bodyEl.textContent = "";
         setQuoteStatus("항목 없음", "warn");
         errEl.textContent = "메일 읽기 화면에서 애드인을 열어주세요.";
+        hideQuoteCriteria();
         setQuoteAiRow("—", "warn", "—");
         return;
       }
@@ -403,6 +422,7 @@
         bodyEl.textContent = "";
         setQuoteStatus("미지원", "warn");
         errEl.textContent = "이 항목에서는 본문을 읽을 수 없습니다.";
+        hideQuoteCriteria();
         setQuoteAiRow("—", "warn", "—");
         return;
       }
@@ -412,6 +432,7 @@
           bodyEl.textContent = "";
           setQuoteStatus("에러", "warn");
           errEl.textContent = result.error?.message || "본문을 읽지 못했습니다.";
+          hideQuoteCriteria();
           setQuoteAiRow("에러", "warn", "—");
           return;
         }
@@ -433,17 +454,66 @@
       verdict.textContent = verdictText;
     }
 
+    const QUOTE_CRITERIA_ORDER = [
+      { key: "journey1Departure", label: "여정1 출발" },
+      { key: "journey1Arrival", label: "여정1 도착" },
+      { key: "journey2Departure", label: "여정2 출발" },
+      { key: "journey2Arrival", label: "여정2 도착" },
+      { key: "preferredDepartTime", label: "출발 희망 시간" },
+      { key: "preferredArrivalTime", label: "도착 희망 시간" },
+      { key: "preferredAirline", label: "선호 항공사" },
+    ];
+
+    const MAX_QUOTE_BODY_SEND = 500;
+
+    function hideQuoteCriteria() {
+      const wrap = document.getElementById("quoteCriteriaWrap");
+      const fields = document.getElementById("quoteCriteriaFields");
+      wrap.style.display = "none";
+      fields.innerHTML = "";
+    }
+
+    function formatCriteriaDisplayValue(val) {
+      if (val == null) return "null";
+      const s = String(val).trim();
+      if (!s) return "null";
+      if (/^[a-zA-Z]{3}$/.test(s)) return s.toUpperCase();
+      if (/^[a-zA-Z]{2}$/.test(s)) return s.toUpperCase();
+      return s;
+    }
+
+    function renderQuoteCriteria(criteria) {
+      const wrap = document.getElementById("quoteCriteriaWrap");
+      const container = document.getElementById("quoteCriteriaFields");
+      container.innerHTML = "";
+      const c = criteria && typeof criteria === "object" ? criteria : {};
+
+      for (const { key, label } of QUOTE_CRITERIA_ORDER) {
+        const div = document.createElement("div");
+        div.className = "field";
+        const v = formatCriteriaDisplayValue(c[key]);
+        div.innerHTML = `
+          <div class="k">${escapeHtml(label)}</div>
+          <div class="v">${escapeHtml(v)}</div>
+        `;
+        container.appendChild(div);
+      }
+      wrap.style.display = "block";
+    }
+
     async function runFlightQuoteClassification(fullBody) {
       const aiErr = document.getElementById("quoteAiError");
       aiErr.textContent = "";
 
       const trimmed = String(fullBody ?? "").trim();
       if (!trimmed) {
+        hideQuoteCriteria();
         setQuoteAiRow("완료", "warn", "본문이 없어 판단할 수 없습니다.");
         return;
       }
 
-      const snippet = trimmed.slice(0, 500);
+      hideQuoteCriteria();
+      const payloadText = trimmed.slice(0, MAX_QUOTE_BODY_SEND);
       setQuoteAiRow("분석 중...", "warn", "…");
 
       const url = `${API_BASE_URL}/api/classify-flight-quote`;
@@ -456,7 +526,7 @@
             "Content-Type": "application/json",
             Accept: "application/json",
           },
-          body: JSON.stringify({ text: snippet }),
+          body: JSON.stringify({ text: payloadText }),
         });
 
         const raw = await res.text();
@@ -468,7 +538,12 @@
         }
 
         if (!res.ok) {
-          const msg = data.error || data.detail || raw || `HTTP ${res.status}`;
+          const msg =
+            data.openaiMessage ||
+            data.error ||
+            data.detail ||
+            raw ||
+            `HTTP ${res.status}`;
           throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
         }
 
@@ -480,8 +555,15 @@
               : "항공 견적 요청이 아닙니다";
 
         setQuoteAiRow("완료", "ok", line);
+
+        if (data.isFlightQuoteRequest && data.criteria && typeof data.criteria === "object") {
+          renderQuoteCriteria(data.criteria);
+        } else {
+          hideQuoteCriteria();
+        }
       } catch (e) {
         console.error(e);
+        hideQuoteCriteria();
         setQuoteAiRow("에러", "warn", "—");
         aiErr.textContent = (e && e.message) ? e.message : String(e);
       }
