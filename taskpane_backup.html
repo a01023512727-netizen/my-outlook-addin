@@ -250,6 +250,18 @@
       color: #111827;
       margin-bottom: 8px;
     }
+
+    .quote-block-title {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--brand);
+      margin-top: 14px;
+      margin-bottom: 6px;
+    }
+
+    .quote-block-title:first-child {
+      margin-top: 0;
+    }
   </style>
 </head>
 <body>
@@ -301,7 +313,8 @@
         <p class="quote-ai-meta">본문 앞부분 최대 500자만 서버로 보내 견적 여부 판단 및 검색 조건을 추출합니다. (OpenAI, 키는 Vercel 환경 변수)</p>
         <div class="quote-ai-verdict" id="quoteAiVerdict">—</div>
         <div class="quote-criteria-wrap" id="quoteCriteriaWrap" style="display: none;">
-          <div class="quote-criteria-title">항공권 검색 조건</div>
+          <div class="quote-criteria-title">항공권 검색 조건 (견적별 · 여정별)</div>
+          <p class="quote-hint" style="margin-top: 0; margin-bottom: 8px;">각 여정 한 줄 형식: 출발지 / 출발일 / 출발시간 / 도착시간 / 항공사 (없으면 Null)</p>
           <div id="quoteCriteriaFields" class="grid"></div>
         </div>
         <div class="error" id="quoteAiError"></div>
@@ -454,16 +467,6 @@
       verdict.textContent = verdictText;
     }
 
-    const QUOTE_CRITERIA_ORDER = [
-      { key: "journey1Departure", label: "여정1 출발" },
-      { key: "journey1Arrival", label: "여정1 도착" },
-      { key: "journey2Departure", label: "여정2 출발" },
-      { key: "journey2Arrival", label: "여정2 도착" },
-      { key: "preferredDepartTime", label: "출발 희망 시간" },
-      { key: "preferredArrivalTime", label: "도착 희망 시간" },
-      { key: "preferredAirline", label: "선호 항공사" },
-    ];
-
     const MAX_QUOTE_BODY_SEND = 500;
 
     function hideQuoteCriteria() {
@@ -473,31 +476,74 @@
       fields.innerHTML = "";
     }
 
-    function formatCriteriaDisplayValue(val) {
-      if (val == null) return "null";
+    /** 빈 값은 UI에서 Null (대문자 N) */
+    function formatQuoteCell(val) {
+      if (val == null) return "Null";
       const s = String(val).trim();
-      if (!s) return "null";
+      if (!s) return "Null";
       if (/^[a-zA-Z]{3}$/.test(s)) return s.toUpperCase();
       if (/^[a-zA-Z]{2}$/.test(s)) return s.toUpperCase();
       return s;
     }
 
-    function renderQuoteCriteria(criteria) {
+    function journeyLine(j) {
+      const o = j && typeof j === "object" ? j : {};
+      return [
+        formatQuoteCell(o.departure),
+        formatQuoteCell(o.departureDate),
+        formatQuoteCell(o.departureTime),
+        formatQuoteCell(o.arrivalTime),
+        formatQuoteCell(o.airline),
+      ].join(" / ");
+    }
+
+    /**
+     * quotes: [ { journeys: [ { departure, departureDate, departureTime, arrivalTime, airline } ] }, ... ]
+     */
+    function renderQuoteCriteria(quotes) {
       const wrap = document.getElementById("quoteCriteriaWrap");
       const container = document.getElementById("quoteCriteriaFields");
       container.innerHTML = "";
-      const c = criteria && typeof criteria === "object" ? criteria : {};
 
-      for (const { key, label } of QUOTE_CRITERIA_ORDER) {
+      const list = Array.isArray(quotes) ? quotes : [];
+      if (list.length === 0) {
         const div = document.createElement("div");
         div.className = "field";
-        const v = formatCriteriaDisplayValue(c[key]);
-        div.innerHTML = `
-          <div class="k">${escapeHtml(label)}</div>
-          <div class="v">${escapeHtml(v)}</div>
-        `;
+        div.innerHTML = `<div class="k">안내</div><div class="v">추출된 견적이 없습니다.</div>`;
         container.appendChild(div);
+        wrap.style.display = "block";
+        return;
       }
+
+      list.forEach((quote, qi) => {
+        const title = document.createElement("div");
+        title.className = "quote-block-title";
+        title.textContent = `견적 ${qi + 1}`;
+        container.appendChild(title);
+
+        const journeys = Array.isArray(quote?.journeys) ? quote.journeys : [];
+        if (journeys.length === 0) {
+          const div = document.createElement("div");
+          div.className = "field";
+          div.innerHTML = `
+            <div class="k">여정1</div>
+            <div class="v">${escapeHtml(journeyLine({}))}</div>
+          `;
+          container.appendChild(div);
+          return;
+        }
+
+        journeys.forEach((j, ji) => {
+          const div = document.createElement("div");
+          div.className = "field";
+          div.innerHTML = `
+            <div class="k">여정${ji + 1}</div>
+            <div class="v">${escapeHtml(journeyLine(j))}</div>
+          `;
+          container.appendChild(div);
+        });
+      });
+
       wrap.style.display = "block";
     }
 
@@ -556,8 +602,8 @@
 
         setQuoteAiRow("완료", "ok", line);
 
-        if (data.isFlightQuoteRequest && data.criteria && typeof data.criteria === "object") {
-          renderQuoteCriteria(data.criteria);
+        if (data.isFlightQuoteRequest && Array.isArray(data.quotes)) {
+          renderQuoteCriteria(data.quotes);
         } else {
           hideQuoteCriteria();
         }
