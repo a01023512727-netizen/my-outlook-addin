@@ -242,7 +242,7 @@
 
   <script>
     // 여기에 실제 Vercel 배포 주소 입력
-    const API_BASE_URL = "https://v0-api-script-generation.vercel.app/";
+    const API_BASE_URL = "https://v0-api-script-generation.vercel.app";
 
     const FEE_FIELD_CANDIDATES = ["수수료", "fee", "commission", "커미션", "rate"];
     const HIDE_FIELDS = ["email", "이메일", "domain", "도메인"];
@@ -346,12 +346,34 @@
     async function fetchVendorInfo(domain) {
       const url = `${API_BASE_URL}/api/vendor?domain=${encodeURIComponent(domain)}`;
 
-      const res = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Accept": "application/json"
-        }
-      });
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "GET",
+          mode: "cors",
+          cache: "no-store",
+          headers: {
+            "Accept": "application/json"
+          }
+        });
+      } catch (e) {
+        const hint =
+          [
+            "네트워크 오류로 API 호출이 실패했습니다. (브라우저/Outlook WebView에서 'Failed to fetch'로 보일 수 있어요)",
+            "",
+            `요청 URL: ${url}`,
+            "",
+            "가능한 원인:",
+            "- API 서버가 CORS를 허용하지 않음 (Access-Control-Allow-Origin 필요)",
+            "- API 서버가 HTTP/인증서/리다이렉트 문제로 차단됨",
+            "- Outlook add-in manifest에 외부 도메인(AppDomains)이 등록되지 않음",
+            "",
+            "조치:",
+            "- Vercel API에서 응답 헤더에 Access-Control-Allow-Origin을 추가하고 OPTIONS(preflight)도 처리하세요",
+            "- 또는 동일 도메인으로 프록시를 두세요",
+          ].join("\n");
+        throw new Error(hint);
+      }
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");

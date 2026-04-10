@@ -9,6 +9,12 @@
   <Hosts>
     <Host Name="Mailbox" />
   </Hosts>
+  <AppDomains>
+    <AppDomain>https://a01023512727-netizen.github.io</AppDomain>
+    <AppDomain>https://v0-api-script-generation.vercel.app</AppDomain>
+    <AppDomain>https://script.google.com</AppDomain>
+    <AppDomain>https://script.googleusercontent.com</AppDomain>
+  </AppDomains>
   <DefaultSettings>
     <SourceLocation DefaultValue="https://a01023512727-netizen.github.io/my-outlook-addin/taskpane.html" />
   </DefaultSettings>
