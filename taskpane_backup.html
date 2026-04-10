@@ -193,15 +193,31 @@
       margin-top: 10px;
     }
 
-    .quote-box {
+    .quote-hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+
+    .quote-body {
+      margin-top: 10px;
+      max-height: min(60vh, 520px);
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 13px;
+      line-height: 1.45;
+      padding: 12px;
       border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 20px;
-      background: var(--card);
-      text-align: center;
-      font-size: 16px;
-      font-weight: 800;
+      border-radius: 12px;
+      background: #fafafa;
       color: #111827;
+      font-family: inherit;
+    }
+
+    #btnQuoteRefresh {
+      margin-top: 12px;
     }
   </style>
 </head>
@@ -237,7 +253,17 @@
   </div>
 
   <div id="quoteTab" class="tab-panel">
-    <div class="quote-box">견적</div>
+    <div class="card">
+      <div class="row" style="align-items:center;">
+        <div class="label" style="font-weight:800;color:#111827;">이 메일 본문</div>
+        <div style="flex:1;"></div>
+        <span class="status" id="quoteStatusPill"><span class="dot"></span><span id="quoteStatusText">대기</span></span>
+      </div>
+      <p class="quote-hint">현재 메일 읽기 창에 열려 있는 <strong>한 통</strong>의 본문만 가져옵니다. (대화 스레드 전체가 아닙니다.)</p>
+      <pre class="quote-body" id="quoteBody" aria-live="polite">견적 탭을 열면 본문을 불러옵니다.</pre>
+      <div class="error" id="quoteError"></div>
+      <button type="button" id="btnQuoteRefresh">본문 다시 읽기</button>
+    </div>
   </div>
 
   <script>
@@ -259,12 +285,20 @@
 
         btn.classList.add("active");
         document.getElementById(targetId).classList.add("active");
+        if (targetId === "quoteTab") {
+          refreshQuoteBody();
+        }
       });
     });
 
+    document.getElementById("btnQuoteRefresh").addEventListener("click", () => refreshQuoteBody());
+
     Office.onReady(() => {
       try {
-        Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => run());
+        Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => {
+          run();
+          refreshQuoteBody();
+        });
       } catch (e) {
         console.error("ItemChanged handler failed:", e);
       }
@@ -317,6 +351,50 @@
         setStatus("에러", "warn");
         showError((e && e.message) ? e.message : String(e));
       }
+    }
+
+    function refreshQuoteBody() {
+      const bodyEl = document.getElementById("quoteBody");
+      const errEl = document.getElementById("quoteError");
+
+      errEl.textContent = "";
+      setQuoteStatus("불러오는 중...", "warn");
+
+      const item = Office?.context?.mailbox?.item;
+      if (!item) {
+        bodyEl.textContent = "";
+        setQuoteStatus("항목 없음", "warn");
+        errEl.textContent = "메일 읽기 화면에서 애드인을 열어주세요.";
+        return;
+      }
+
+      if (typeof item.body?.getAsync !== "function") {
+        bodyEl.textContent = "";
+        setQuoteStatus("미지원", "warn");
+        errEl.textContent = "이 항목에서는 본문을 읽을 수 없습니다.";
+        return;
+      }
+
+      item.body.getAsync(Office.CoercionType.Text, (result) => {
+        if (result.status !== Office.AsyncResultStatus.Succeeded) {
+          bodyEl.textContent = "";
+          setQuoteStatus("에러", "warn");
+          errEl.textContent = result.error?.message || "본문을 읽지 못했습니다.";
+          return;
+        }
+
+        const text = result.value != null ? String(result.value) : "";
+        bodyEl.textContent = text.trim() === "" ? "(본문이 비어 있거나 가져올 수 없습니다.)" : text;
+        setQuoteStatus("완료", "ok");
+      });
+    }
+
+    function setQuoteStatus(text, tone) {
+      const pill = document.getElementById("quoteStatusPill");
+      const t = document.getElementById("quoteStatusText");
+      t.textContent = text;
+      pill.classList.remove("ok", "warn");
+      pill.classList.add(tone === "ok" ? "ok" : "warn");
     }
 
     function getFromInfo() {
