@@ -61,8 +61,6 @@
       display: block;
     }
 
-    .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
-
     .card {
       border: 1px solid var(--border);
       border-radius: 14px;
@@ -109,7 +107,6 @@
       outline: none;
     }
     .input:focus { border-color: rgba(43,87,154,0.5); box-shadow: 0 0 0 3px rgba(43,87,154,0.12); }
-    .hint { color: var(--muted); font-size: 12px; margin-top: 8px; white-space: pre-wrap; }
 
     button {
       padding: 9px 12px;
@@ -171,33 +168,27 @@
   </div>
 
   <script>
-    // ✅ 너의 Apps Script 웹앱 URL
-    const SCRIPT_API_URL = "https://script.google.com/macros/s/AKfycbxfjOBYWzdCKEXcwYWAVkVQY6ZenOUPgbW0o3EF_QSlMucz_v8tvrElun5uqgP0ahU9/exec";
+    // 여기에 배포 후 Vercel 주소 넣기
+    const API_BASE_URL = "https://YOUR-VERCEL-APP.vercel.app";
 
-    // ✅ 수수료 컬럼명 후보 (헤더가 무엇이든 자동 탐색)
     const FEE_FIELD_CANDIDATES = ["수수료", "fee", "commission", "커미션", "rate"];
-
-    // ✅ 표시에서 제외할 컬럼(원하면 추가)
     const HIDE_FIELDS = ["email", "이메일", "domain", "도메인"];
-
-    // ✅ "B열부터 보여주기" => record의 첫 번째 컬럼(A열, key) 항상 제외
-    // Apps Script 응답에서 headers/record가 오고, headers[0]이 A열이라고 가정.
     const SKIP_FIRST_COLUMN = true;
 
     let currentFeeRate = null;
     let currentFeeText = null;
 
-    document.getElementById('btnRefresh').addEventListener('click', run);
+    document.getElementById("btnRefresh").addEventListener("click", run);
 
-    document.querySelectorAll('.tab-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
         const targetId = btn.dataset.tab;
 
-        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
-        document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.remove('active'));
+        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.remove("active"));
 
-        btn.classList.add('active');
-        document.getElementById(targetId).classList.add('active');
+        btn.classList.add("active");
+        document.getElementById(targetId).classList.add("active");
       });
     });
 
@@ -218,15 +209,15 @@
 
       try {
         const { fromEmail, fromDomain } = getFromInfo();
-        document.getElementById('fromEmail').textContent = fromEmail || '(없음)';
-        document.getElementById('fromDomain').textContent = fromDomain || '(없음)';
+        document.getElementById("fromEmail").textContent = fromEmail || "(없음)";
+        document.getElementById("fromDomain").textContent = fromDomain || "(없음)";
 
         if (!fromDomain) {
           setStatus("발신자 도메인을 읽지 못했습니다.", "warn");
           return;
         }
 
-        const json = await callScriptJsonp(fromDomain);
+        const json = await fetchVendorInfo(fromDomain);
 
         if (!json.allowed) {
           setStatus("완료", "ok");
@@ -243,12 +234,11 @@
         if (!json.record || typeof json.record !== "object") {
           setStatus("에러", "warn");
           setResult("응답 형식 오류", "warn");
-          throw new Error("Apps Script 응답에 record가 없습니다.");
+          throw new Error("API 응답에 record가 없습니다.");
         }
 
         setStatus("완료", "ok");
         setResult("매칭됨 ✅", "ok");
-
         renderFields(json);
 
       } catch (e) {
@@ -260,62 +250,55 @@
 
     function getFromInfo() {
       const item = Office?.context?.mailbox?.item;
-      if (!item) throw new Error("Office.context.mailbox.item 이 없습니다. (메일 읽기 화면에서 열어주세요)");
-      const fromEmail = item?.from?.emailAddress || '';
+      if (!item) {
+        throw new Error("Office.context.mailbox.item 이 없습니다. (메일 읽기 화면에서 열어주세요)");
+      }
+
+      const fromEmail = item?.from?.emailAddress || "";
       const fromDomain = normalizeToDomain(fromEmail);
       return { fromEmail, fromDomain };
     }
 
     function normalizeToDomain(value) {
-      if (value == null) return '';
+      if (value == null) return "";
       let s = String(value);
-      s = s.replace(/\u00A0/g, ' ').trim().toLowerCase();
-      s = s.replace(/^https?:\/\//, '');
-      s = s.replace(/,.*$/, '');
-      s = s.replace(/\/.*$/, '');
-      s = s.replace(/^[.@]+/, '');
-      if (s.includes('@')) s = s.slice(s.lastIndexOf('@') + 1).trim();
+      s = s.replace(/\u00A0/g, " ").trim().toLowerCase();
+      s = s.replace(/^https?:\/\//, "");
+      s = s.replace(/,.*$/, "");
+      s = s.replace(/\/.*$/, "");
+      s = s.replace(/^[.@]+/, "");
+      if (s.includes("@")) s = s.slice(s.lastIndexOf("@") + 1).trim();
       return s;
     }
 
-    function callScriptJsonp(domain) {
-      return new Promise((resolve, reject) => {
-        const cbName = "cb_" + Math.random().toString(36).slice(2);
-        const timeout = setTimeout(() => {
-          cleanup();
-          reject(new Error("Apps Script JSONP timeout"));
-        }, 12000);
+    async function fetchVendorInfo(domain) {
+      const url = `${API_BASE_URL}/api/vendor?domain=${encodeURIComponent(domain)}`;
 
-        window[cbName] = (data) => { cleanup(); resolve(data); };
-
-        const url =
-          `${SCRIPT_API_URL}?domain=${encodeURIComponent(domain)}` +
-          `&callback=${encodeURIComponent(cbName)}` +
-          `&_ts=${Date.now()}`;
-
-        const script = document.createElement("script");
-        script.src = url;
-        script.async = true;
-        script.onerror = () => { cleanup(); reject(new Error("Apps Script JSONP load failed")); };
-
-        document.head.appendChild(script);
-
-        function cleanup() {
-          clearTimeout(timeout);
-          try { delete window[cbName]; } catch {}
-          if (script && script.parentNode) script.parentNode.removeChild(script);
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json"
         }
       });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`API 호출 실패 (${res.status}) ${text}`);
+      }
+
+      return await res.json();
     }
 
     function renderFields(json) {
       const record = json.record;
       const headers = Array.isArray(json.headers) ? json.headers : Object.keys(record);
 
-      let keys = headers.filter(h => String(h || '').trim() !== "");
+      let keys = headers.filter(h => String(h || "").trim() !== "");
       if (SKIP_FIRST_COLUMN && keys.length > 0) keys = keys.slice(1);
 
-      keys = keys.filter(k => !HIDE_FIELDS.map(x => x.toLowerCase()).includes(String(k).toLowerCase()));
+      keys = keys.filter(
+        k => !HIDE_FIELDS.map(x => x.toLowerCase()).includes(String(k).toLowerCase())
+      );
 
       const feeKey = findFeeKey(record, keys);
       const feeRaw = feeKey ? record[feeKey] : null;
