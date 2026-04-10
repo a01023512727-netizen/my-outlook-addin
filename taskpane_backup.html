@@ -219,6 +219,24 @@
     #btnQuoteRefresh {
       margin-top: 12px;
     }
+
+    .quote-ai-card {
+      margin-top: 12px;
+    }
+
+    .quote-ai-verdict {
+      font-size: 15px;
+      font-weight: 800;
+      color: #111827;
+      margin-top: 8px;
+      line-height: 1.45;
+    }
+
+    .quote-ai-meta {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
   </style>
 </head>
 <body>
@@ -261,6 +279,16 @@
       </div>
       <p class="quote-hint">현재 메일 읽기 창에 열려 있는 <strong>한 통</strong>의 본문만 가져옵니다. (대화 스레드 전체가 아닙니다.)</p>
       <pre class="quote-body" id="quoteBody" aria-live="polite">견적 탭을 열면 본문을 불러옵니다.</pre>
+      <div class="card quote-ai-card">
+        <div class="row" style="align-items:center;">
+          <div class="label" style="font-weight:800;color:#111827;">항공 견적 여부 (AI)</div>
+          <div style="flex:1;"></div>
+          <span class="status" id="quoteAiPill"><span class="dot"></span><span id="quoteAiStatusText">대기</span></span>
+        </div>
+        <p class="quote-ai-meta">본문 앞부분 최대 500자만 서버로 보내 판단합니다. (OpenAI, 키는 Vercel 환경 변수)</p>
+        <div class="quote-ai-verdict" id="quoteAiVerdict">—</div>
+        <div class="error" id="quoteAiError"></div>
+      </div>
       <div class="error" id="quoteError"></div>
       <button type="button" id="btnQuoteRefresh">본문 다시 읽기</button>
     </div>
@@ -358,6 +386,8 @@
       const errEl = document.getElementById("quoteError");
 
       errEl.textContent = "";
+      document.getElementById("quoteAiError").textContent = "";
+      setQuoteAiRow("대기", "warn", "—");
       setQuoteStatus("불러오는 중...", "warn");
 
       const item = Office?.context?.mailbox?.item;
@@ -365,6 +395,7 @@
         bodyEl.textContent = "";
         setQuoteStatus("항목 없음", "warn");
         errEl.textContent = "메일 읽기 화면에서 애드인을 열어주세요.";
+        setQuoteAiRow("—", "warn", "—");
         return;
       }
 
@@ -372,6 +403,7 @@
         bodyEl.textContent = "";
         setQuoteStatus("미지원", "warn");
         errEl.textContent = "이 항목에서는 본문을 읽을 수 없습니다.";
+        setQuoteAiRow("—", "warn", "—");
         return;
       }
 
@@ -380,13 +412,79 @@
           bodyEl.textContent = "";
           setQuoteStatus("에러", "warn");
           errEl.textContent = result.error?.message || "본문을 읽지 못했습니다.";
+          setQuoteAiRow("에러", "warn", "—");
           return;
         }
 
         const text = result.value != null ? String(result.value) : "";
         bodyEl.textContent = text.trim() === "" ? "(본문이 비어 있거나 가져올 수 없습니다.)" : text;
         setQuoteStatus("완료", "ok");
+        void runFlightQuoteClassification(text);
       });
+    }
+
+    function setQuoteAiRow(pillText, tone, verdictText) {
+      const pill = document.getElementById("quoteAiPill");
+      const st = document.getElementById("quoteAiStatusText");
+      const verdict = document.getElementById("quoteAiVerdict");
+      st.textContent = pillText;
+      pill.classList.remove("ok", "warn");
+      pill.classList.add(tone === "ok" ? "ok" : "warn");
+      verdict.textContent = verdictText;
+    }
+
+    async function runFlightQuoteClassification(fullBody) {
+      const aiErr = document.getElementById("quoteAiError");
+      aiErr.textContent = "";
+
+      const trimmed = String(fullBody ?? "").trim();
+      if (!trimmed) {
+        setQuoteAiRow("완료", "warn", "본문이 없어 판단할 수 없습니다.");
+        return;
+      }
+
+      const snippet = trimmed.slice(0, 500);
+      setQuoteAiRow("분석 중...", "warn", "…");
+
+      const url = `${API_BASE_URL}/api/classify-flight-quote`;
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          mode: "cors",
+          cache: "no-store",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ text: snippet }),
+        });
+
+        const raw = await res.text();
+        let data;
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch {
+          throw new Error(`서버 응답을 해석할 수 없습니다. (${res.status})`);
+        }
+
+        if (!res.ok) {
+          const msg = data.error || data.detail || raw || `HTTP ${res.status}`;
+          throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+        }
+
+        const line =
+          typeof data.message === "string" && data.message
+            ? data.message
+            : data.isFlightQuoteRequest
+              ? "항공 견적요청입니다"
+              : "항공 견적 요청이 아닙니다";
+
+        setQuoteAiRow("완료", "ok", line);
+      } catch (e) {
+        console.error(e);
+        setQuoteAiRow("에러", "warn", "—");
+        aiErr.textContent = (e && e.message) ? e.message : String(e);
+      }
     }
 
     function setQuoteStatus(text, tone) {
